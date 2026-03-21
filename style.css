@@ -1,8 +1,8 @@
 :root {
-    --bg-primary: #0a0a0f;
-    --bg-secondary: #111118;
-    --bg-card: #16161f;
-    --bg-card-hover: #1c1c28;
+    --bg-primary: #141a27;
+    --bg-secondary: #1a2132;
+    --bg-card: #1e2738;
+    --bg-card-hover: #252e40;
     --border: rgba(255, 255, 255, 0.06);
     --border-hover: rgba(255, 255, 255, 0.12);
     --text-primary: #e8e8ed;
@@ -17,8 +17,8 @@
     --danger: #ef4444;
     --gradient: linear-gradient(135deg, #6366f1, #06b6d4);
     --gradient-text: linear-gradient(135deg, #6366f1, #06b6d4, #8b5cf6);
-    --glass: rgba(255, 255, 255, 0.03);
-    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass: rgba(255, 255, 255, 0.04);
+    --glass-border: rgba(255, 255, 255, 0.09);
     --radius: 12px;
     --radius-lg: 20px;
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
@@ -433,6 +433,13 @@ img { max-width: 100%; display: block; }
     border-right: 1px solid var(--border);
 }
 
+.ticker-arrow {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    padding: 0 0.5rem; font-size: 0.7rem; transition: var(--transition);
+    display: flex; align-items: center; flex-shrink: 0;
+}
+.ticker-arrow:hover { color: var(--accent); }
+
 .ticker-track {
     flex: 1;
     overflow: hidden;
@@ -451,11 +458,15 @@ img { max-width: 100%; display: block; }
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
     font-size: 0.8rem;
     color: var(--text-secondary);
     flex-shrink: 0;
 }
 
+.ticker-item:hover { color: var(--text-primary); }
 .ticker-item i { color: var(--accent); font-size: 0.5rem; }
 
 @keyframes tickerScroll {
@@ -973,8 +984,8 @@ img { max-width: 100%; display: block; }
 .chat-widget { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
 
 .chat-toggle {
-    width: 56px; height: 56px; border-radius: 50%; background: var(--gradient);
-    border: none; color: #fff; font-size: 1.3rem; cursor: pointer;
+    width: 84px; height: 84px; border-radius: 50%; background: var(--gradient);
+    border: none; color: #fff; font-size: 2rem; cursor: pointer;
     box-shadow: 0 4px 16px var(--accent-glow); transition: var(--transition);
     display: flex; align-items: center; justify-content: center;
     position: relative; animation: chatPulse 3s ease-in-out infinite;

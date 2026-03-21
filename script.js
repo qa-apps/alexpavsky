@@ -35,6 +35,101 @@
         });
     }
 
+    // ─── Animated Terminal ───
+    (function initTerminal() {
+        var tb = document.getElementById('terminal-body');
+        var tt = document.querySelector('.terminal-title');
+        if (!tb) return;
+        var scenes = [
+            { title: 'ai-radar.sh', lines: [
+                {p: true, html: '<span class="t-cmd">scanning</span> <span class="t-arg">--sources 7 --topics ai,qa,llm</span>'},
+                {html: '<span class="t-success">✓</span> Connected to RSS feeds...'},
+                {html: '<span class="t-info">↳</span> The Gradient — <span class="t-highlight">3 new</span>'},
+                {html: '<span class="t-info">↳</span> Hugging Face — <span class="t-highlight">5 new</span>'},
+                {html: '<span class="t-info">↳</span> AI Weirdness — <span class="t-highlight">1 new</span>'},
+                {html: '<span class="t-info">↳</span> Martin Fowler — <span class="t-highlight">2 new</span>'},
+                {html: '<span class="t-success">✓</span> Feed updated. <span class="t-dim">Next refresh in 30m</span>'},
+            ]},
+            { title: 'chat_server.py', lines: [
+                {p: true, html: '<span class="t-cmd">python3</span> <span class="t-arg">chat_server.py</span>'},
+                {html: '<span class="t-success">✓</span> Loaded 25 AI models'},
+                {html: '<span class="t-info">↳</span> gemini: <span class="t-highlight">OK</span>'},
+                {html: '<span class="t-info">↳</span> openrouter: <span class="t-highlight">OK</span>'},
+                {html: '<span class="t-info">↳</span> groq: <span class="t-highlight">OK</span>'},
+                {html: '<span class="t-success">✓</span> Smart router active on <span class="t-highlight">:8000</span>'},
+                {html: '<span class="t-dim">Waiting for requests...</span>'},
+            ]},
+            { title: 'test_runner.py', lines: [
+                {p: true, html: '<span class="t-cmd">pytest</span> <span class="t-arg">tests/ -v --parallel</span>'},
+                {html: '<span class="t-success">PASS</span> test_login_flow <span class="t-dim">0.8s</span>'},
+                {html: '<span class="t-success">PASS</span> test_api_response <span class="t-dim">0.3s</span>'},
+                {html: '<span class="t-success">PASS</span> test_model_routing <span class="t-dim">1.2s</span>'},
+                {html: '<span class="t-success">PASS</span> test_fallback_chain <span class="t-dim">0.9s</span>'},
+                {html: '<span class="t-success">PASS</span> test_prompt_injection <span class="t-dim">0.5s</span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">5 passed</span> in <span class="t-dim">3.7s</span>'},
+            ]},
+            { title: 'deploy.sh', lines: [
+                {p: true, html: '<span class="t-cmd">rsync</span> <span class="t-arg">--deploy alexpavsky.com</span>'},
+                {html: '<span class="t-info">↳</span> Building assets...'},
+                {html: '<span class="t-info">↳</span> Uploading <span class="t-highlight">4 files</span>'},
+                {html: '<span class="t-info">↳</span> Restarting chat backend...'},
+                {html: '<span class="t-success">✓</span> SSL certificate valid'},
+                {html: '<span class="t-success">✓</span> nginx proxy active'},
+                {html: '<span class="t-success">✓</span> Live at <span class="t-highlight">alexpavsky.com</span>'},
+            ]},
+            { title: 'ai_orchestrator.py', lines: [
+                {p: true, html: '<span class="t-cmd">route</span> <span class="t-arg">--message "Explain prompt injection"</span>'},
+                {html: '<span class="t-info">↳</span> Analyzing complexity... <span class="t-highlight">tier:M</span>'},
+                {html: '<span class="t-info">↳</span> Selected: <span class="t-highlight">Gemini 2.5 Flash</span>'},
+                {html: '<span class="t-info">↳</span> Tokens: <span class="t-dim">in:42 out:380</span>'},
+                {html: '<span class="t-success">✓</span> Response in <span class="t-highlight">1.2s</span>'},
+                {html: '<span class="t-dim">Fallback chain: OpenRouter → Groq</span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">25 models</span> ready'},
+            ]},
+            { title: 'playwright.config.ts', lines: [
+                {p: true, html: '<span class="t-cmd">npx</span> <span class="t-arg">playwright test --headed</span>'},
+                {html: '<span class="t-info">↳</span> Running 12 tests on 3 browsers...'},
+                {html: '<span class="t-success">✓</span> chromium: <span class="t-highlight">12/12</span>'},
+                {html: '<span class="t-success">✓</span> firefox: <span class="t-highlight">12/12</span>'},
+                {html: '<span class="t-success">✓</span> webkit: <span class="t-highlight">12/12</span>'},
+                {html: '<span class="t-success">✓</span> Screenshots captured'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">36 passed</span> <span class="t-dim">(18s)</span>'},
+            ]},
+        ];
+        var idx = 0;
+        function playScene() {
+            var scene = scenes[idx];
+            idx = (idx + 1) % scenes.length;
+            tb.innerHTML = '';
+            if (tt) tt.textContent = scene.title;
+            var i = 0;
+            function addLine() {
+                if (i >= scene.lines.length) {
+                    var cursor = document.createElement('div');
+                    cursor.className = 'terminal-line';
+                    cursor.innerHTML = '<span class="t-prompt">$</span> <span class="t-cursor">_</span>';
+                    tb.appendChild(cursor);
+                    setTimeout(playScene, 3500);
+                    return;
+                }
+                var line = scene.lines[i];
+                var el = document.createElement('div');
+                el.className = 'terminal-line' + (line.p ? '' : ' t-output');
+                el.style.opacity = '0'; el.style.transform = 'translateY(6px)';
+                el.innerHTML = (line.p ? '<span class="t-prompt">$</span> ' : '') + line.html;
+                tb.appendChild(el);
+                requestAnimationFrame(function () {
+                    el.style.transition = 'opacity 0.3s, transform 0.3s';
+                    el.style.opacity = '1'; el.style.transform = 'translateY(0)';
+                });
+                i++;
+                setTimeout(addLine, line.p ? 600 : 400);
+            }
+            addLine();
+        }
+        playScene();
+    })();
+
     // ─── Scroll animations ───
     var animObserver = new IntersectionObserver(function (entries) {
         entries.forEach(function (entry) {
@@ -167,15 +262,50 @@
         updateStats(articles);
     }
 
+    (function initTickerArrows() {
+        var content = document.getElementById('ticker-content');
+        var leftBtn = document.getElementById('ticker-left');
+        var rightBtn = document.getElementById('ticker-right');
+        if (!content || !leftBtn || !rightBtn) return;
+        function getCurrentX() {
+            var style = getComputedStyle(content);
+            var t = style.transform;
+            if (!t || t === 'none') return 0;
+            var mat = t.match(/matrix\((.+)\)/);
+            if (mat) return parseFloat(mat[1].split(',')[4]) || 0;
+            return 0;
+        }
+        function jump(dir) {
+            var current = getCurrentX();
+            content.style.animation = 'none';
+            content.style.transform = 'translateX(' + current + 'px)';
+            void content.offsetWidth;
+            var next = current + dir * 400;
+            var half = content.scrollWidth / 2;
+            if (Math.abs(next) > half) next = 0;
+            if (next > 0) next = -half + 100;
+            content.style.transition = 'transform 0.4s ease';
+            content.style.transform = 'translateX(' + next + 'px)';
+            setTimeout(function () {
+                content.style.transition = '';
+                content.style.animation = '';
+                content.style.transform = '';
+            }, 500);
+        }
+        leftBtn.addEventListener('click', function () { jump(1); });
+        rightBtn.addEventListener('click', function () { jump(-1); });
+    })();
+
     function updateTicker(articles) {
         var ticker = document.getElementById('ticker-content');
         if (!ticker || articles.length === 0) return;
         var headlines = articles.slice(0, 20);
         var html = '';
         headlines.forEach(function (a) {
-            html += '<span class="ticker-item"><i class="fas fa-circle-dot"></i> ' +
+            html += '<a class="ticker-item" href="' + escapeHtml(a.link) + '" target="_blank" rel="noopener">' +
+                    '<i class="fas fa-circle-dot"></i> ' +
                     '<strong>' + escapeHtml(a.source) + ':</strong> ' +
-                    escapeHtml(a.title) + '</span>';
+                    escapeHtml(a.title) + '</a>';
         });
         ticker.innerHTML = html + html;
     }
