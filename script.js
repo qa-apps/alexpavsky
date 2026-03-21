@@ -313,83 +313,422 @@
     }
 
     // ─── Chat Widget ───
-    var chatToggle = document.getElementById('chat-toggle');
-    var chatWindow = document.getElementById('chat-window');
-    var chatClose = document.getElementById('chat-close');
-    var chatForm = document.getElementById('chat-form');
-    var chatInput = document.getElementById('chat-input');
-    var chatMessages = document.getElementById('chat-messages');
-    var chatReset = document.getElementById('chat-reset');
-    var openChatBtn = document.getElementById('open-chat-btn');
-    var chatOpen = false;
+    (function initChatWidget() {
+        var chatToggle = document.getElementById('chat-toggle');
+        var chatWindow = document.getElementById('chat-window');
+        var chatClose = document.getElementById('chat-close');
+        var chatForm = document.getElementById('chat-form');
+        var chatInput = document.getElementById('chat-input');
+        var chatMessages = document.getElementById('chat-messages');
+        var chatReset = document.getElementById('chat-reset');
+        var chatMaximize = document.getElementById('chat-maximize');
+        var chatStop = document.getElementById('chat-stop');
+        var chatClearInput = document.getElementById('chat-clear-input');
+        var attachBtn = document.getElementById('chat-attach-btn');
+        var micBtn = document.getElementById('chat-mic-btn');
+        var fileInput = document.getElementById('chat-file-input');
+        var attachmentsContainer = document.getElementById('chat-attachments');
+        var chatInputContainer = chatWindow ? chatWindow.querySelector('.chat-input-container') : null;
+        var resizeTopHandle = document.getElementById('chat-resize-top');
+        var resizeLeftHandle = document.getElementById('chat-resize-left');
+        var openChatBtn = document.getElementById('open-chat-btn');
 
-    function toggleChat() {
-        chatOpen = !chatOpen;
-        chatWindow.classList.toggle('active', chatOpen);
-        chatToggle.classList.toggle('active', chatOpen);
-        if (chatOpen) chatInput.focus();
-    }
+        if (!chatToggle || !chatWindow || !chatClose || !chatForm || !chatInput || !chatMessages) return;
 
-    if (chatToggle) chatToggle.addEventListener('click', toggleChat);
-    if (chatClose) chatClose.addEventListener('click', function () { if (chatOpen) toggleChat(); });
-    if (openChatBtn) openChatBtn.addEventListener('click', function () { if (!chatOpen) toggleChat(); });
+        var isOpen = false;
+        var isMaximized = false;
+        var isSending = false;
+        var currentAbort = null;
+        var pendingFiles = [];
+        var maxAttachments = 4;
+        var maxFileBytes = 25 * 1024 * 1024;
+        var maxTextChars = 12000;
+        var minChatHeight = 420;
+        var maxChatHeight = 860;
+        var minChatWidth = 320;
+        var maxChatWidth = 700;
+        var resizeState = null;
+        var WELCOME_MSG = 'Hey! I\'m an AI assistant. Ask me anything — QA, AI testing, coding, science, or just chat.';
 
-    if (chatReset && chatMessages) {
-        chatReset.addEventListener('click', function () {
-            chatMessages.innerHTML =
-                '<div class="chat-message bot-message">' +
-                '<div class="message-avatar"><i class="fas fa-robot"></i></div>' +
-                '<div class="message-content"><p>Hey! I\'m an AI assistant focused on QA, testing, and AI safety topics. Ask me anything.</p></div>' +
-                '</div>';
+        var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        var recognition = null;
+        var isListening = false;
+        var voiceLangs = [
+            {code: '', label: 'Auto'}, {code: 'en-US', label: 'EN'}, {code: 'ru-RU', label: 'RU'},
+            {code: 'es-ES', label: 'ES'}, {code: 'de-DE', label: 'DE'}, {code: 'fr-FR', label: 'FR'},
+            {code: 'zh-CN', label: '中文'}, {code: 'pt-BR', label: 'PT'}, {code: 'ar-SA', label: 'AR'},
+        ];
+        var voiceLangIndex = 0;
+
+        function openChat(focusInput) {
+            if (isOpen) { if (focusInput) chatInput.focus(); return; }
+            isOpen = true;
+            chatWindow.classList.add('active');
+            chatToggle.classList.add('active');
+            if (focusInput) chatInput.focus();
+        }
+
+        function closeChat() {
+            if (!isOpen) return;
+            isOpen = false;
+            chatWindow.classList.remove('active');
+            chatToggle.classList.remove('active');
+        }
+
+        chatToggle.addEventListener('click', function () {
+            if (isOpen) closeChat(); else openChat(true);
         });
-    }
+        chatClose.addEventListener('click', closeChat);
+        if (openChatBtn) openChatBtn.addEventListener('click', function () { openChat(true); });
 
-    if (chatForm && chatInput && chatMessages) {
-        chatForm.addEventListener('submit', function (e) {
+        if (chatMaximize) {
+            chatMaximize.addEventListener('click', function () {
+                isMaximized = !isMaximized;
+                chatWindow.classList.toggle('maximized', isMaximized);
+                var icon = chatMaximize.querySelector('i');
+                if (icon) icon.className = isMaximized ? 'fas fa-compress-arrows-alt' : 'fas fa-expand-arrows-alt';
+            });
+        }
+
+        if (chatStop) {
+            chatStop.addEventListener('click', function () {
+                if (currentAbort) { currentAbort.abort(); currentAbort = null; }
+                isSending = false;
+                chatStop.classList.remove('visible');
+                hideTypingIndicator();
+            });
+        }
+
+        if (chatClearInput) {
+            chatInput.addEventListener('input', function () {
+                chatClearInput.classList.toggle('visible', chatInput.value.length > 0);
+            });
+            chatClearInput.addEventListener('click', function () {
+                chatInput.value = '';
+                chatClearInput.classList.remove('visible');
+                chatInput.focus();
+            });
+        }
+
+        if (chatReset) {
+            chatReset.addEventListener('click', function () {
+                if (currentAbort) { currentAbort.abort(); currentAbort = null; }
+                isSending = false;
+                if (chatStop) chatStop.classList.remove('visible');
+                chatMessages.innerHTML = '<div class="chat-message bot-message"><div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content"><p>' + WELCOME_MSG + '</p></div></div>';
+                chatInput.value = '';
+                pendingFiles = [];
+                renderPendingFiles();
+                if (chatClearInput) chatClearInput.classList.remove('visible');
+            });
+        }
+
+        // ── File upload ──
+        function addFiles(files) {
+            if (!files || !files.length) return;
+            Array.from(files).forEach(function (file) {
+                if (pendingFiles.length >= maxAttachments) return;
+                if (file.size > maxFileBytes) return;
+                var dup = pendingFiles.some(function (f) { return f.name === file.name && f.size === file.size; });
+                if (!dup) pendingFiles.push(file);
+            });
+            renderPendingFiles();
+        }
+
+        function renderPendingFiles() {
+            if (!attachmentsContainer) return;
+            attachmentsContainer.innerHTML = '';
+            pendingFiles.forEach(function (file, idx) {
+                var chip = document.createElement('div');
+                chip.className = 'chat-attachment-chip';
+                var iconClass = file.type.startsWith('image/') ? 'fa-image' : 'fa-file';
+                chip.innerHTML = '<i class="fas ' + iconClass + '"></i><span class="chip-name">' + escapeHtml(file.name) + '</span><button type="button" class="chat-attachment-remove" data-index="' + idx + '">&times;</button>';
+                attachmentsContainer.appendChild(chip);
+            });
+            attachmentsContainer.querySelectorAll('.chat-attachment-remove').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    pendingFiles.splice(Number(this.dataset.index), 1);
+                    renderPendingFiles();
+                });
+            });
+        }
+
+        if (attachBtn && fileInput) {
+            attachBtn.addEventListener('click', function () { fileInput.click(); });
+            fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
+        }
+
+        if (chatInputContainer) {
+            chatInputContainer.addEventListener('dragover', function (e) { e.preventDefault(); chatInputContainer.classList.add('drag-over'); });
+            chatInputContainer.addEventListener('dragleave', function (e) { e.preventDefault(); chatInputContainer.classList.remove('drag-over'); });
+            chatInputContainer.addEventListener('drop', function (e) {
+                e.preventDefault();
+                chatInputContainer.classList.remove('drag-over');
+                if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+            });
+        }
+
+        // ── Voice input ──
+        if (micBtn && SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = voiceLangs[0].code;
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+            recognition.continuous = false;
+
+            var langBadge = document.createElement('span');
+            langBadge.className = 'mic-lang-badge';
+            langBadge.textContent = voiceLangs[0].label;
+            micBtn.appendChild(langBadge);
+
+            recognition.onstart = function () { isListening = true; micBtn.classList.add('active'); };
+            recognition.onend = function () { isListening = false; micBtn.classList.remove('active'); };
+            recognition.onerror = function () { isListening = false; micBtn.classList.remove('active'); };
+
+            recognition.onresult = function (event) {
+                var spoken = event && event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+                if (!spoken) return;
+                var cur = chatInput.value.trim();
+                chatInput.value = cur ? cur + ' ' + spoken : spoken;
+                if (chatClearInput) chatClearInput.classList.toggle('visible', chatInput.value.length > 0);
+                chatInput.focus();
+            };
+
+            micBtn.addEventListener('click', function () {
+                if (isListening) recognition.stop();
+                else { recognition.lang = voiceLangs[voiceLangIndex].code; recognition.start(); }
+            });
+
+            micBtn.addEventListener('contextmenu', function (e) {
+                e.preventDefault();
+                if (isListening) recognition.stop();
+                voiceLangIndex = (voiceLangIndex + 1) % voiceLangs.length;
+                recognition.lang = voiceLangs[voiceLangIndex].code;
+                langBadge.textContent = voiceLangs[voiceLangIndex].label;
+            });
+        } else if (micBtn) {
+            micBtn.disabled = true;
+            micBtn.title = 'Voice input not supported in this browser';
+        }
+
+        // ── File serialization ──
+        function isTextFile(file) {
+            if (file.type && file.type.startsWith('text/')) return true;
+            var name = (file.name || '').toLowerCase();
+            return ['.txt', '.md', '.csv', '.json', '.xml', '.yml', '.yaml'].some(function (ext) { return name.endsWith(ext); });
+        }
+
+        function readAsDataUrl(file) {
+            return new Promise(function (resolve, reject) {
+                var reader = new FileReader();
+                reader.onload = function () { resolve(String(reader.result || '')); };
+                reader.onerror = function () { reject(reader.error || new Error('read_error')); };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function serializeAttachments(files) {
+            var promises = files.map(function (file) {
+                var base = { name: file.name, type: file.type || 'application/octet-stream', size: file.size };
+                if (file.type.startsWith('image/')) {
+                    return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'image', data_url: url }); });
+                }
+                if (isTextFile(file)) {
+                    return file.text().then(function (text) {
+                        var truncated = text.length > maxTextChars;
+                        return Object.assign(base, { kind: 'text', text: truncated ? text.slice(0, maxTextChars) : text, truncated: truncated });
+                    });
+                }
+                return Promise.resolve(Object.assign(base, { kind: 'file' }));
+            });
+            return Promise.all(promises);
+        }
+
+        // ── Messages ──
+        function addUserMessage(text, attachments) {
+            var safeText = text ? '<p>' + escapeHtml(text) + '</p>' : '';
+            var names = (attachments || []).map(function (a) { return a && a.name; }).filter(Boolean);
+            var filesLine = names.length ? '<p>📎 ' + escapeHtml(names.join(', ')) + '</p>' : '';
+            var div = document.createElement('div');
+            div.className = 'chat-message user-message';
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-user"></i></div><div class="message-content">' + (safeText || '<p>📎 Sent attachment(s)</p>') + filesLine + '</div>';
+            chatMessages.appendChild(div);
+            scrollToBottom();
+        }
+
+        function addBotMessage(text) {
+            var div = document.createElement('div');
+            div.className = 'chat-message bot-message';
+            var safe = escapeHtml(text).replace(/\n/g, '<br>');
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content"><p>' + safe + '</p></div>';
+            chatMessages.appendChild(div);
+            scrollToBottom();
+        }
+
+        function showTypingIndicator() {
+            var div = document.createElement('div');
+            div.className = 'chat-message bot-message typing-indicator-msg';
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+            chatMessages.appendChild(div);
+            scrollToBottom();
+        }
+
+        function hideTypingIndicator() {
+            var el = chatMessages.querySelector('.typing-indicator-msg');
+            if (el) el.remove();
+        }
+
+        function scrollToBottom() { chatMessages.scrollTop = chatMessages.scrollHeight; }
+
+        // ── Submit ──
+        chatForm.addEventListener('submit', async function (e) {
             e.preventDefault();
-            var msg = chatInput.value.trim();
-            if (!msg) return;
+            if (isSending) return;
+            var message = chatInput.value.trim();
+            if (!message && !pendingFiles.length) return;
 
-            var userDiv = document.createElement('div');
-            userDiv.className = 'chat-message user-message';
-            userDiv.innerHTML =
-                '<div class="message-avatar"><i class="fas fa-user"></i></div>' +
-                '<div class="message-content"><p>' + escapeHtml(msg) + '</p></div>';
-            chatMessages.appendChild(userDiv);
-            chatInput.value = '';
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            var queuedFiles = pendingFiles.slice();
+            var attachmentSummary = queuedFiles.map(function (f) {
+                return { name: f.name, type: f.type, size: f.size, kind: f.type.startsWith('image/') ? 'image' : 'file' };
+            });
 
-            setTimeout(function () {
-                var botDiv = document.createElement('div');
-                botDiv.className = 'chat-message bot-message';
-                botDiv.innerHTML =
-                    '<div class="message-avatar"><i class="fas fa-robot"></i></div>' +
-                    '<div class="message-content"><p>' + getBotReply(msg) + '</p></div>';
-                chatMessages.appendChild(botDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }, 600);
+            isSending = true;
+            if (recognition && isListening) recognition.stop();
+
+            try {
+                var attachments = await serializeAttachments(queuedFiles);
+                addUserMessage(message, attachmentSummary);
+                chatInput.value = '';
+                if (chatClearInput) chatClearInput.classList.remove('visible');
+                pendingFiles = [];
+                renderPendingFiles();
+                showTypingIndicator();
+                await handleBotResponse(message, attachments);
+            } catch (err) {
+                hideTypingIndicator();
+                addBotMessage('Could not process the request. Please try again.');
+            } finally {
+                isSending = false;
+            }
         });
-    }
 
-    function getBotReply(msg) {
-        var lower = msg.toLowerCase();
-        if (/^(hi|hello|hey|привет)/.test(lower)) {
-            return 'Hey there! Ask me anything about AI testing, QA automation, or red teaming.';
+        // ── API call ──
+        async function handleBotResponse(userMessage, attachments) {
+            currentAbort = new AbortController();
+            if (chatStop) chatStop.classList.add('visible');
+
+            try {
+                var response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: currentAbort.signal,
+                    body: JSON.stringify({ message: userMessage, attachments: attachments || [] })
+                });
+
+                if (!response.ok) {
+                    var errText = '';
+                    try { var errData = await response.json(); errText = errData.message || errData.error || ''; } catch (_) {}
+                    throw new Error(errText || 'HTTP ' + response.status);
+                }
+
+                var data = await response.json();
+                hideTypingIndicator();
+
+                var reply = data && typeof data.reply === 'string' ? data.reply : '';
+                addBotMessage(reply || 'Sorry, I didn\'t get a response. Please try again.');
+
+                if (data && data.model) {
+                    var info = document.createElement('div');
+                    info.className = 'chat-routed-info';
+                    info.textContent = data.model;
+                    chatMessages.appendChild(info);
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                if (error && error.name === 'AbortError') {
+                    addBotMessage('Response stopped.');
+                } else {
+                    addBotMessage(getFallbackReply(userMessage));
+                }
+            } finally {
+                currentAbort = null;
+                isSending = false;
+                if (chatStop) chatStop.classList.remove('visible');
+            }
         }
-        if (/prompt.?inject|jailbreak|red.?team/i.test(lower)) {
-            return 'Prompt injection is one of the top security risks in LLM apps. Common vectors include direct injection, indirect injection via retrieved context, and system prompt extraction. Tools like Promptfoo and Garak are great for automated red teaming.';
+
+        function getFallbackReply(msg) {
+            var lower = (msg || '').toLowerCase();
+            if (/^(hi|hello|hey|привет|здравствуй)/.test(lower))
+                return 'Hey there! Ask me anything — AI testing, coding, science, history, or just chat.';
+            if (/prompt.?inject|jailbreak|red.?team/i.test(lower))
+                return 'Prompt injection is a top security risk in LLM apps. Common vectors: direct injection, indirect via retrieved context, and system prompt extraction. Tools like Promptfoo and Garak are great for automated red teaming.';
+            if (/playwright|automat|e2e|selenium/i.test(lower))
+                return 'Playwright is excellent for E2E testing — Chromium, Firefox, WebKit with one API. For AI apps, combine Playwright with custom assertions that check LLM output quality, not just UI state.';
+            if (/eval|rag|agent|llm.?test|deepeval|promptfoo/i.test(lower))
+                return 'LLM evaluation is evolving fast. Key frameworks: Promptfoo (open-source, CI-friendly), DeepEval (Python-native metrics), Phoenix (tracing + evals). For RAG: focus on context relevance, faithfulness, and answer completeness.';
+            if (/python|javascript|typescript|code|function|bug|error/i.test(lower))
+                return 'I can help with coding questions! For the full experience, the AI backend will use Groq, Gemini, and OpenRouter models. Right now I\'m running in demo mode with preset answers.';
+            if (/weather|news|price|stock/i.test(lower))
+                return 'I don\'t have real-time data access in demo mode. Once the full backend is connected, I\'ll use models with web search capabilities for current information.';
+            return 'Great question! I\'m currently in demo mode — the full AI backend (Groq + Gemini + OpenRouter) is coming soon and will handle any topic. Try asking about prompt injection, Playwright, LLM evaluation, or coding!';
         }
-        if (/playwright|automat|e2e|test/i.test(lower)) {
-            return 'Playwright is my go-to for E2E testing. It supports Chromium, Firefox, and WebKit with a single API. For AI apps, I combine Playwright with custom assertions that check LLM output quality, not just UI state.';
+
+        // ── Resize ──
+        function getMaxChatHeight() { return Math.max(minChatHeight, Math.min(maxChatHeight, window.innerHeight - 110)); }
+        function getMaxChatWidth() { return Math.max(minChatWidth, Math.min(maxChatWidth, window.innerWidth - 40)); }
+
+        function applyChatHeight(h) {
+            if (window.innerWidth <= 480) return;
+            var clamped = Math.max(minChatHeight, Math.min(getMaxChatHeight(), h));
+            chatWindow.style.height = Math.round(clamped) + 'px';
         }
-        if (/eval|rag|agent|llm.?test/i.test(lower)) {
-            return 'LLM evaluation is evolving fast. Key frameworks: Promptfoo (open-source, CI-friendly), DeepEval (Python-native metrics), and Phoenix (tracing + evals). For RAG, I focus on context relevance, faithfulness, and answer completeness.';
+        function applyChatWidth(w) {
+            if (window.innerWidth <= 480) return;
+            var clamped = Math.max(minChatWidth, Math.min(getMaxChatWidth(), w));
+            chatWindow.style.width = Math.round(clamped) + 'px';
         }
-        if (/tool|stack|what.*use/i.test(lower)) {
-            return 'My current stack: Playwright for E2E, Promptfoo + DeepEval for LLM evals, Phoenix for observability, GitHub Actions for CI/CD, Docker for environments. For AI safety: Garak, custom red team scripts, and manual adversarial testing.';
+
+        function startResize(edge, event) {
+            if (window.innerWidth <= 480) return;
+            event.preventDefault();
+            var rect = chatWindow.getBoundingClientRect();
+            resizeState = { edge: edge, startX: event.clientX, startY: event.clientY, startHeight: rect.height, startWidth: rect.width };
+            chatWindow.classList.add('resizing');
+            window.addEventListener('pointermove', onResizeMove);
+            window.addEventListener('pointerup', stopResize);
         }
-        return 'Interesting question! This is a demo chat — full AI backend coming soon. In the meantime, try asking about prompt injection, Playwright, LLM evaluation, or my tool stack.';
-    }
+
+        function onResizeMove(event) {
+            if (!resizeState) return;
+            if (resizeState.edge === 'top') applyChatHeight(resizeState.startHeight - (event.clientY - resizeState.startY));
+            else applyChatWidth(resizeState.startWidth - (event.clientX - resizeState.startX));
+        }
+
+        function stopResize() {
+            if (!resizeState) return;
+            resizeState = null;
+            chatWindow.classList.remove('resizing');
+            window.removeEventListener('pointermove', onResizeMove);
+            window.removeEventListener('pointerup', stopResize);
+            try {
+                localStorage.setItem('chat_h', chatWindow.style.height);
+                localStorage.setItem('chat_w', chatWindow.style.width);
+            } catch (_) {}
+        }
+
+        if (resizeTopHandle) resizeTopHandle.addEventListener('pointerdown', function (e) { startResize('top', e); });
+        if (resizeLeftHandle) resizeLeftHandle.addEventListener('pointerdown', function (e) { startResize('left', e); });
+
+        try {
+            var sh = parseInt(localStorage.getItem('chat_h'));
+            var sw = parseInt(localStorage.getItem('chat_w'));
+            if (sh) applyChatHeight(sh);
+            if (sw) applyChatWidth(sw);
+        } catch (_) {}
+
+        renderPendingFiles();
+    })();
 
     // ─── Terminal typing animation ───
     var terminalLines = document.querySelectorAll('#terminal-body .t-output');

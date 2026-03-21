@@ -366,6 +366,8 @@
             <span class="chat-badge">AI</span>
         </button>
         <div id="chat-window" class="chat-window">
+            <div class="chat-resize-handle chat-resize-handle-top" id="chat-resize-top"></div>
+            <div class="chat-resize-handle chat-resize-handle-left" id="chat-resize-left"></div>
             <div class="chat-header">
                 <div class="chat-header-info">
                     <div class="chat-avatar"><i class="fas fa-robot"></i></div>
@@ -375,6 +377,7 @@
                     </div>
                 </div>
                 <div class="chat-header-actions">
+                    <button id="chat-maximize" class="chat-header-btn" aria-label="Maximize" title="Maximize"><i class="fas fa-expand-arrows-alt"></i></button>
                     <button id="chat-reset" class="chat-header-btn" aria-label="New chat" title="New chat"><i class="fas fa-rotate-right"></i></button>
                     <button id="chat-close" class="chat-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
@@ -383,14 +386,32 @@
                 <div class="chat-message bot-message">
                     <div class="message-avatar"><i class="fas fa-robot"></i></div>
                     <div class="message-content">
-                        <p>Hey! I'm an AI assistant focused on QA, testing, and AI safety topics. Ask me anything.</p>
+                        <p>Hey! I'm an AI assistant. Ask me anything — QA, AI testing, coding, science, or just chat.</p>
                     </div>
                 </div>
             </div>
-            <form id="chat-form" class="chat-form">
-                <input type="text" id="chat-input" class="chat-input" placeholder="Ask about AI testing, red teaming..." autocomplete="off">
-                <button type="submit" class="chat-send-btn" aria-label="Send"><i class="fas fa-paper-plane"></i></button>
-            </form>
+            <div class="chat-input-container">
+                <input type="file" id="chat-file-input" class="chat-file-input" accept="image/*,.txt,.md,.csv,.json,.pdf,.doc,.docx,.xls,.xlsx" multiple>
+                <div id="chat-attachments" class="chat-attachments"></div>
+                <form id="chat-form" class="chat-form">
+                    <button type="button" id="chat-attach-btn" class="chat-action-btn" aria-label="Attach file" title="Attach file">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                    <button type="button" id="chat-mic-btn" class="chat-action-btn" aria-label="Voice input" title="Voice input (right-click to change language)">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <div class="chat-input-wrap">
+                        <input type="text" id="chat-input" class="chat-input" placeholder="Type your message..." autocomplete="off">
+                        <button type="button" id="chat-stop" class="chat-inline-btn chat-stop-btn" aria-label="Stop" title="Stop">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                        <button type="button" id="chat-clear-input" class="chat-inline-btn chat-clear-btn" aria-label="Clear" title="Clear">
+                            <i class="fas fa-xmark"></i>
+                        </button>
+                    </div>
+                    <button type="submit" class="chat-send-btn" aria-label="Send"><i class="fas fa-paper-plane"></i></button>
+                </form>
+            </div>
         </div>
     </div>
 
