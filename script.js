@@ -470,6 +470,7 @@
         var isSending = false;
         var currentAbort = null;
         var pendingFiles = [];
+        var conversationHistory = [];
         var maxAttachments = 4;
         var maxFileBytes = 25 * 1024 * 1024;
         var maxTextChars = 12000;
@@ -479,6 +480,28 @@
         var maxChatWidth = 700;
         var resizeState = null;
         var WELCOME_MSG = 'Hey! I\'m an AI assistant. Ask me anything — QA, AI testing, coding, science, or just chat.';
+
+        var CONSENT_KEY = 'alexpavsky_chat_consent';
+        var chatConsent = document.getElementById('chat-consent');
+        var chatConsentCb = document.getElementById('chat-consent-cb');
+        var chatConsentBtn = document.getElementById('chat-consent-btn');
+        var hasConsent = false;
+        try { hasConsent = localStorage.getItem(CONSENT_KEY) === 'yes'; } catch (e) {}
+
+        if (hasConsent && chatConsent) chatConsent.classList.add('hidden');
+
+        if (chatConsentCb && chatConsentBtn) {
+            chatConsentCb.addEventListener('change', function () {
+                chatConsentBtn.disabled = !chatConsentCb.checked;
+            });
+            chatConsentBtn.addEventListener('click', function () {
+                if (!chatConsentCb.checked) return;
+                try { localStorage.setItem(CONSENT_KEY, 'yes'); } catch (e) {}
+                hasConsent = true;
+                if (chatConsent) chatConsent.classList.add('hidden');
+                chatInput.focus();
+            });
+        }
 
         var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         var recognition = null;
@@ -548,6 +571,7 @@
                 chatMessages.innerHTML = '<div class="chat-message bot-message"><div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content"><p>' + WELCOME_MSG + '</p></div></div>';
                 chatInput.value = '';
                 pendingFiles = [];
+                conversationHistory = [];
                 renderPendingFiles();
                 if (chatClearInput) chatClearInput.classList.remove('visible');
             });
@@ -588,12 +612,17 @@
             fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
         }
 
-        if (chatInputContainer) {
-            chatInputContainer.addEventListener('dragover', function (e) { e.preventDefault(); chatInputContainer.classList.add('drag-over'); });
-            chatInputContainer.addEventListener('dragleave', function (e) { e.preventDefault(); chatInputContainer.classList.remove('drag-over'); });
-            chatInputContainer.addEventListener('drop', function (e) {
+        var dropZone = chatWindow;
+        if (dropZone) {
+            dropZone.addEventListener('dragover', function (e) { e.preventDefault(); if (chatInputContainer) chatInputContainer.classList.add('drag-over'); });
+            dropZone.addEventListener('dragleave', function (e) {
+                if (!dropZone.contains(e.relatedTarget)) {
+                    if (chatInputContainer) chatInputContainer.classList.remove('drag-over');
+                }
+            });
+            dropZone.addEventListener('drop', function (e) {
                 e.preventDefault();
-                chatInputContainer.classList.remove('drag-over');
+                if (chatInputContainer) chatInputContainer.classList.remove('drag-over');
                 if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
             });
         }
@@ -748,11 +777,13 @@
             if (chatStop) chatStop.classList.add('visible');
 
             try {
+                conversationHistory.push({ role: 'user', content: userMessage || '[attachment]' });
                 var response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     signal: currentAbort.signal,
-                    body: JSON.stringify({ message: userMessage, attachments: attachments || [] })
+                    body: JSON.stringify({ message: userMessage, attachments: attachments || [], history: conversationHistory.slice(0, -1) })
                 });
 
                 if (!response.ok) {
@@ -765,14 +796,11 @@
                 hideTypingIndicator();
 
                 var reply = data && typeof data.reply === 'string' ? data.reply : '';
-                addBotMessage(reply || 'Sorry, I didn\'t get a response. Please try again.');
+                var botMsg = reply || 'Sorry, I didn\'t get a response. Please try again.';
+                conversationHistory.push({ role: 'assistant', content: botMsg });
+                if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-30);
+                addBotMessage(botMsg);
 
-                if (data && data.model) {
-                    var info = document.createElement('div');
-                    info.className = 'chat-routed-info';
-                    info.textContent = data.model;
-                    chatMessages.appendChild(info);
-                }
             } catch (error) {
                 hideTypingIndicator();
                 if (error && error.name === 'AbortError') {

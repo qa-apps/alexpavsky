@@ -1,8 +1,11 @@
+import hashlib
 import json
 import logging
 import os
 import re
+import sqlite3
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,6 +14,48 @@ from urllib.request import Request, urlopen
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("chat")
+
+DB_PATH = Path(__file__).resolve().parent / "chat.db"
+_db_lock = __import__("threading").Lock()
+
+
+def _init_db():
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS chat_logs (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        ip_hash TEXT NOT NULL,
+        role TEXT NOT NULL,
+        message TEXT NOT NULL,
+        model TEXT,
+        created_at REAL NOT NULL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_logs(session_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_time ON chat_logs(created_at)")
+    conn.commit()
+    conn.close()
+
+
+def _log_message(session_id, ip_hash, role, message, model=None):
+    try:
+        with _db_lock:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.execute(
+                "INSERT INTO chat_logs (id, session_id, ip_hash, role, message, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, session_id, ip_hash, role, message[:50000], model, time.time()),
+            )
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        log.warning("db log error: %s", e)
+
+
+def _hash_ip(ip):
+    return hashlib.sha256((ip or "unknown").encode()).hexdigest()[:16]
+
+
+_init_db()
 
 
 def _load_dotenv():
@@ -249,8 +294,7 @@ def _build_content(message, attachments, model_id):
     return parts, warning
 
 
-def _call_gemini(model_id, system_prompt, user_content, api_key):
-    url = f"{GEMINI_API_URL}/{model_id}:generateContent?key={api_key}"
+def _content_to_gemini_parts(user_content):
     parts = []
     if isinstance(user_content, str):
         parts.append({"text": user_content})
@@ -264,9 +308,19 @@ def _call_gemini(model_id, system_prompt, user_content, api_key):
                     header, b64 = data_url.split(",", 1)
                     mime = header.split(":")[1].split(";")[0] if ":" in header else "image/png"
                     parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+    return parts
+
+
+def _call_gemini(model_id, system_prompt, user_content, api_key, history=None):
+    url = f"{GEMINI_API_URL}/{model_id}:generateContent?key={api_key}"
+    contents = []
+    for h in (history or []):
+        role = "model" if h.get("role") == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": h.get("content", "")}]})
+    contents.append({"role": "user", "parts": _content_to_gemini_parts(user_content)})
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"parts": parts}],
+        "contents": contents,
         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
     }
     req = Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
@@ -287,17 +341,21 @@ def _extract_reply(data):
     return ""
 
 
-def _call_model(model, system_prompt, user_content, max_tok=1024):
+def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
     provider = model.get("provider", "groq")
     api_key = os.environ.get(PROVIDER_KEY_ENV.get(provider, "GROQ_API_KEY"))
     if not api_key:
         return None, f"missing_{provider}_key"
     try:
         if provider == "gemini":
-            return _call_gemini(model["id"], system_prompt, user_content, api_key), None
+            return _call_gemini(model["id"], system_prompt, user_content, api_key, history), None
+        messages = [{"role": "system", "content": system_prompt}]
+        for h in (history or []):
+            messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+        messages.append({"role": "user", "content": user_content})
         payload = {
             "model": model["id"],
-            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}],
+            "messages": messages,
             "temperature": 0.7,
             "max_tokens": max_tok,
         }
@@ -338,18 +396,34 @@ def _get_fallback_chain(current, tier):
 
 class Handler(SimpleHTTPRequestHandler):
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Credentials", "true")
 
-    def _json(self, status, payload):
+    def _get_session(self):
+        cookie_header = self.headers.get("Cookie", "")
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith("ap_chat_sid="):
+                return part.split("=", 1)[1].strip()
+        return None
+
+    def _json(self, status, payload, new_session=None):
         data = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self._cors()
+        if new_session:
+            self.send_header("Set-Cookie", f"ap_chat_sid={new_session}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _client_ip(self):
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        return forwarded.split(",")[0].strip() if forwarded else self.client_address[0]
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -376,40 +450,54 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(400, {"error": "invalid_json"})
             return
 
+        session_id = self._get_session()
+        new_session = None
+        if not session_id:
+            session_id = uuid.uuid4().hex
+            new_session = session_id
+        ip_hash = _hash_ip(self._client_ip())
+
         message = _clean(body.get("message"), 12000)
         attachments = _sanitize_attachments(body.get("attachments", []))
+        history = body.get("history", [])
+        if not isinstance(history, list):
+            history = []
+        history = history[-20:]
 
         if not message and not attachments:
             self._json(400, {"error": "empty_message"})
             return
 
+        _log_message(session_id, ip_hash, "user", message or "[attachment]")
+
         model, tier, reason = _route(message, attachments)
         max_tok = _max_tokens(tier)
         user_content, warning = _build_content(message, attachments, model["id"])
 
-        log.info("route: %s tier=%s reason=%s", model["label"], tier, reason)
+        log.info("route: %s tier=%s reason=%s sid=%s", model["label"], tier, reason, session_id[:8])
 
-        reply, err = _call_model(model, SYSTEM_PROMPT, user_content, max_tok)
+        reply, err = _call_model(model, SYSTEM_PROMPT, user_content, max_tok, history)
 
         if not reply or not reply.strip():
             chain = _get_fallback_chain(model, tier)
             for fallback in chain[:6]:
                 log.info("fallback: %s -> %s (%s)", model["label"], fallback["label"], fallback["provider"])
-                reply, err = _call_model(fallback, SYSTEM_PROMPT, user_content, max_tok)
+                reply, err = _call_model(fallback, SYSTEM_PROMPT, user_content, max_tok, history)
                 if reply and reply.strip():
                     model = fallback
                     break
-                import time as _t
-                _t.sleep(0.5)
+                time.sleep(0.5)
 
         if not reply or not reply.strip():
-            self._json(502, {"error": err or "no_response", "reply": "Sorry, all AI models are temporarily unavailable. Please try again in a moment."})
+            self._json(502, {"error": err or "no_response", "reply": "Sorry, all AI models are temporarily unavailable. Please try again in a moment."}, new_session)
             return
 
-        result = {"reply": reply.strip(), "model": model["label"]}
+        _log_message(session_id, ip_hash, "assistant", reply.strip(), model["label"])
+
+        result = {"reply": reply.strip()}
         if warning:
             result["warning"] = warning
-        self._json(200, result)
+        self._json(200, result, new_session)
 
 
 def main():

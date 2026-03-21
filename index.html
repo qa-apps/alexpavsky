@@ -362,6 +362,18 @@
                     <button id="chat-close" class="chat-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
             </div>
+            <div class="chat-consent" id="chat-consent">
+                <div class="chat-consent-inner">
+                    <div class="chat-consent-icon"><i class="fas fa-shield-halved"></i></div>
+                    <h4>Before we start</h4>
+                    <p>This AI chat is for informational purposes only. Responses may be inaccurate or incomplete. Do not share sensitive personal data. Chat logs may be stored for quality and safety.</p>
+                    <label class="chat-consent-check">
+                        <input type="checkbox" id="chat-consent-cb">
+                        <span>I agree to the <a href="mailto:alex@alexpavsky.com">terms of use</a> and understand AI limitations</span>
+                    </label>
+                    <button type="button" id="chat-consent-btn" class="chat-consent-agree" disabled>Agree & Start Chat</button>
+                </div>
+            </div>
             <div class="chat-messages" id="chat-messages">
                 <div class="chat-message bot-message">
                     <div class="message-avatar"><i class="fas fa-robot"></i></div>
