@@ -72,7 +72,7 @@ img { max-width: 100%; display: block; }
 .nav-brand {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.15rem;
     font-size: 1.1rem;
     font-weight: 600;
 }
