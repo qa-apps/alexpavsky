@@ -518,6 +518,14 @@
             isOpen = true;
             chatWindow.classList.add('active');
             chatToggle.classList.add('active');
+            if (!isMaximized) {
+                isMaximized = true;
+                chatWindow.classList.add('maximized');
+                if (chatMaximize) {
+                    var icon = chatMaximize.querySelector('i');
+                    if (icon) icon.className = 'fas fa-compress-arrows-alt';
+                }
+            }
             if (focusInput) chatInput.focus();
         }
 
