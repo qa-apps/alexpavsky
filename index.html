@@ -3,39 +3,397 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alex Pavsky</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            color: #fff;
-        }
-        .container {
-            text-align: center;
-            padding: 2rem;
-        }
-        h1 {
-            font-size: 3rem;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        p {
-            font-size: 1.2rem;
-            opacity: 0.7;
-        }
-    </style>
+    <title>Alex Pavsky — AI & QA Lab</title>
+    <meta name="description" content="Personal tech hub: AI testing, QA automation, curated news feed, and tools.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Alex Pavsky</h1>
-        <p>Site is live. Deploy successful.</p>
+
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="#" class="nav-brand">
+                <span class="brand-icon"><i class="fas fa-terminal"></i></span>
+                <span class="brand-text">alex<span class="brand-accent">pavsky</span></span>
+            </a>
+            <div class="nav-links">
+                <a href="#feed" class="nav-link">Feed</a>
+                <a href="#explore" class="nav-link">Explore</a>
+                <a href="#tools" class="nav-link">Tools</a>
+                <a href="#lab" class="nav-link">Lab</a>
+            </div>
+            <button class="nav-menu-btn" id="nav-menu-btn" aria-label="Menu">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </nav>
+
+    <div class="mobile-menu" id="mobile-menu">
+        <a href="#feed" class="mobile-link">Feed</a>
+        <a href="#explore" class="mobile-link">Explore</a>
+        <a href="#tools" class="mobile-link">Tools</a>
+        <a href="#lab" class="mobile-link">Lab</a>
     </div>
+
+    <header class="hero" id="hero">
+        <div class="hero-bg">
+            <div class="grid-overlay"></div>
+            <div class="glow glow-1"></div>
+            <div class="glow glow-2"></div>
+            <div class="glow glow-3"></div>
+        </div>
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="pulse-dot"></span>
+                AI & Quality Engineering
+            </div>
+            <h1 class="hero-title">
+                Breaking AI.<br>
+                <span class="gradient-text">Building trust.</span>
+            </h1>
+            <p class="hero-subtitle">
+                Personal tech hub — exploring LLM testing, red teaming, automation, and everything where AI meets quality.
+            </p>
+            <div class="hero-stats">
+                <div class="stat-item" data-animate>
+                    <span class="stat-value" id="stat-articles">0</span>
+                    <span class="stat-label">Articles today</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item" data-animate>
+                    <span class="stat-value" id="stat-sources">7</span>
+                    <span class="stat-label">RSS sources</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item" data-animate>
+                    <span class="stat-value">24/7</span>
+                    <span class="stat-label">Auto-updated</span>
+                </div>
+            </div>
+            <div class="hero-actions">
+                <a href="#feed" class="btn btn-primary">
+                    <i class="fas fa-bolt"></i> Live Feed
+                </a>
+                <a href="#lab" class="btn btn-glass">
+                    <i class="fas fa-flask"></i> AI Lab
+                </a>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="terminal-card">
+                <div class="terminal-header">
+                    <span class="terminal-dot red"></span>
+                    <span class="terminal-dot yellow"></span>
+                    <span class="terminal-dot green"></span>
+                    <span class="terminal-title">ai-radar.sh</span>
+                </div>
+                <div class="terminal-body" id="terminal-body">
+                    <div class="terminal-line">
+                        <span class="t-prompt">$</span> <span class="t-cmd">scanning</span> <span class="t-arg">--sources 7 --topics ai,qa,llm</span>
+                    </div>
+                    <div class="terminal-line t-output">
+                        <span class="t-success">✓</span> Connected to RSS feeds...
+                    </div>
+                    <div class="terminal-line t-output">
+                        <span class="t-info">↳</span> The Gradient — <span class="t-highlight">3 new</span>
+                    </div>
+                    <div class="terminal-line t-output">
+                        <span class="t-info">↳</span> Hugging Face — <span class="t-highlight">5 new</span>
+                    </div>
+                    <div class="terminal-line t-output">
+                        <span class="t-info">↳</span> AI Weirdness — <span class="t-highlight">1 new</span>
+                    </div>
+                    <div class="terminal-line t-output">
+                        <span class="t-info">↳</span> Martin Fowler — <span class="t-highlight">2 new</span>
+                    </div>
+                    <div class="terminal-line t-output">
+                        <span class="t-success">✓</span> Feed updated. <span class="t-dim">Next refresh in 30m</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="t-prompt">$</span> <span class="t-cursor">_</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="ticker-bar">
+        <div class="ticker-label"><i class="fas fa-signal-stream"></i> LIVE</div>
+        <div class="ticker-track">
+            <div class="ticker-content" id="ticker-content">
+                <span class="ticker-item"><i class="fas fa-circle-dot"></i> Loading latest headlines...</span>
+            </div>
+        </div>
+    </div>
+
+    <section class="section" id="feed">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">
+                    <i class="fas fa-rss"></i> AI / QA Radar
+                </div>
+                <h2 class="section-title">Live Feed</h2>
+                <p class="section-desc">Auto-curated from top AI, QA, and testing sources. Updated every 30 minutes.</p>
+            </div>
+            <div class="feed-filters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="ai">AI & LLM</button>
+                <button class="filter-btn" data-filter="qa">QA & Testing</button>
+                <button class="filter-btn" data-filter="dev">Dev & Engineering</button>
+            </div>
+            <div class="feed-grid" id="feed-grid">
+                <div class="feed-loading">
+                    <div class="spinner"></div>
+                    <p>Fetching latest articles...</p>
+                </div>
+            </div>
+            <div class="feed-more">
+                <button class="btn btn-glass" id="load-more-btn" style="display:none">
+                    <i class="fas fa-arrow-down"></i> Load More
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="section section-alt" id="explore">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">
+                    <i class="fas fa-compass"></i> Explore
+                </div>
+                <h2 class="section-title">What I'm Into</h2>
+                <p class="section-desc">Current obsessions, experiments, and things I find fascinating.</p>
+            </div>
+            <div class="explore-grid">
+                <div class="explore-card" data-animate>
+                    <div class="explore-icon"><i class="fas fa-shield-halved"></i></div>
+                    <h3>AI Red Teaming</h3>
+                    <p>Trying to break LLMs before they break production. Prompt injection, jailbreaks, adversarial testing.</p>
+                    <div class="explore-tags">
+                        <span class="tag">Prompt Injection</span>
+                        <span class="tag">Jailbreaks</span>
+                        <span class="tag">Safety</span>
+                    </div>
+                </div>
+                <div class="explore-card" data-animate>
+                    <div class="explore-icon"><i class="fas fa-robot"></i></div>
+                    <h3>LLM Evaluation</h3>
+                    <p>Building eval pipelines for RAG systems and AI agents. Measuring what actually matters.</p>
+                    <div class="explore-tags">
+                        <span class="tag">Promptfoo</span>
+                        <span class="tag">DeepEval</span>
+                        <span class="tag">Phoenix</span>
+                    </div>
+                </div>
+                <div class="explore-card" data-animate>
+                    <div class="explore-icon"><i class="fas fa-code"></i></div>
+                    <h3>Test Automation</h3>
+                    <p>Playwright, CI/CD pipelines, and making machines test other machines.</p>
+                    <div class="explore-tags">
+                        <span class="tag">Playwright</span>
+                        <span class="tag">GitHub Actions</span>
+                        <span class="tag">Docker</span>
+                    </div>
+                </div>
+                <div class="explore-card" data-animate>
+                    <div class="explore-icon"><i class="fas fa-brain"></i></div>
+                    <h3>AI + Psychology</h3>
+                    <p>How humans interact with AI. Emotional attachment, trust, bias in user experience.</p>
+                    <div class="explore-tags">
+                        <span class="tag">UX Research</span>
+                        <span class="tag">Cognitive Bias</span>
+                        <span class="tag">Trust</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="tools">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">
+                    <i class="fas fa-wrench"></i> Toolkit
+                </div>
+                <h2 class="section-title">Tools I Use</h2>
+                <p class="section-desc">Daily drivers for testing, automation, and AI quality workflows.</p>
+            </div>
+            <div class="tools-grid">
+                <a href="https://www.promptfoo.dev/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">🧪</div>
+                    <h4>Promptfoo</h4>
+                    <p>LLM eval framework</p>
+                </a>
+                <a href="https://playwright.dev/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">🎭</div>
+                    <h4>Playwright</h4>
+                    <p>E2E test automation</p>
+                </a>
+                <a href="https://www.confident-ai.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">📊</div>
+                    <h4>DeepEval</h4>
+                    <p>LLM testing metrics</p>
+                </a>
+                <a href="https://phoenix.arize.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">🔥</div>
+                    <h4>Phoenix</h4>
+                    <p>AI observability</p>
+                </a>
+                <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">⚙️</div>
+                    <h4>GitHub Actions</h4>
+                    <p>CI/CD pipelines</p>
+                </a>
+                <a href="https://www.docker.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">🐳</div>
+                    <h4>Docker</h4>
+                    <p>Containerization</p>
+                </a>
+                <a href="https://www.postman.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">📬</div>
+                    <h4>Postman</h4>
+                    <p>API testing</p>
+                </a>
+                <a href="https://www.langchain.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                    <div class="tool-icon">🔗</div>
+                    <h4>LangChain</h4>
+                    <p>LLM orchestration</p>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <section class="section section-alt" id="lab">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">
+                    <i class="fas fa-flask-vial"></i> Lab
+                </div>
+                <h2 class="section-title">AI Lab</h2>
+                <p class="section-desc">Quick utilities and experiments. More coming soon.</p>
+            </div>
+            <div class="lab-grid">
+                <div class="lab-card" data-animate>
+                    <div class="lab-icon"><i class="fas fa-comments"></i></div>
+                    <h3>AI Assistant</h3>
+                    <p>Chat with an AI that knows about QA, testing, and AI safety. Powered by open-source models.</p>
+                    <button class="btn btn-primary btn-sm" id="open-chat-btn">
+                        <i class="fas fa-message"></i> Open Chat
+                    </button>
+                </div>
+                <div class="lab-card" data-animate>
+                    <div class="lab-icon"><i class="fas fa-timer"></i></div>
+                    <h3>JSON Formatter</h3>
+                    <p>Paste messy JSON, get it pretty-printed. A tool I use daily.</p>
+                    <button class="btn btn-glass btn-sm" id="open-json-btn">
+                        <i class="fas fa-code"></i> Open Tool
+                    </button>
+                </div>
+                <div class="lab-card" data-animate>
+                    <div class="lab-icon"><i class="fas fa-text-size"></i></div>
+                    <h3>Diff Checker</h3>
+                    <p>Compare two texts side by side. Handy for API response diffs.</p>
+                    <button class="btn btn-glass btn-sm" id="open-diff-btn">
+                        <i class="fas fa-columns"></i> Open Tool
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="json-modal" id="json-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-code"></i> JSON Formatter</h3>
+                <button class="modal-close" id="json-modal-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <textarea id="json-input" class="code-input" placeholder="Paste your JSON here..."></textarea>
+                <div class="modal-actions">
+                    <button class="btn btn-primary btn-sm" id="json-format-btn">Format</button>
+                    <button class="btn btn-glass btn-sm" id="json-copy-btn">Copy</button>
+                    <button class="btn btn-glass btn-sm" id="json-clear-btn">Clear</button>
+                </div>
+                <pre id="json-output" class="code-output"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="diff-modal" id="diff-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h3><i class="fas fa-columns"></i> Diff Checker</h3>
+                <button class="modal-close" id="diff-modal-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="diff-inputs">
+                    <textarea id="diff-left" class="code-input" placeholder="Original text..."></textarea>
+                    <textarea id="diff-right" class="code-input" placeholder="Modified text..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary btn-sm" id="diff-compare-btn">Compare</button>
+                    <button class="btn btn-glass btn-sm" id="diff-clear-btn">Clear</button>
+                </div>
+                <div id="diff-output" class="diff-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-inner">
+                <div class="footer-brand">
+                    <span class="brand-icon"><i class="fas fa-terminal"></i></span>
+                    alex<span class="brand-accent">pavsky</span>
+                </div>
+                <p class="footer-text">Personal tech hub. Built with curiosity.</p>
+                <div class="footer-links">
+                    <a href="https://github.com/qa-apps" target="_blank" rel="noopener"><i class="fab fa-github"></i></a>
+                    <a href="https://linkedin.com" target="_blank" rel="noopener"><i class="fab fa-linkedin"></i></a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <div id="chat-widget" class="chat-widget">
+        <button id="chat-toggle" class="chat-toggle" aria-label="Open AI chat">
+            <i class="fas fa-robot"></i>
+            <span class="chat-badge">AI</span>
+        </button>
+        <div id="chat-window" class="chat-window">
+            <div class="chat-header">
+                <div class="chat-header-info">
+                    <div class="chat-avatar"><i class="fas fa-robot"></i></div>
+                    <div>
+                        <h4>AI Assistant</h4>
+                        <span class="chat-status"><span class="status-dot"></span> Online</span>
+                    </div>
+                </div>
+                <div class="chat-header-actions">
+                    <button id="chat-reset" class="chat-header-btn" aria-label="New chat" title="New chat"><i class="fas fa-rotate-right"></i></button>
+                    <button id="chat-close" class="chat-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-message bot-message">
+                    <div class="message-avatar"><i class="fas fa-robot"></i></div>
+                    <div class="message-content">
+                        <p>Hey! I'm an AI assistant focused on QA, testing, and AI safety topics. Ask me anything.</p>
+                    </div>
+                </div>
+            </div>
+            <form id="chat-form" class="chat-form">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Ask about AI testing, red teaming..." autocomplete="off">
+                <button type="submit" class="chat-send-btn" aria-label="Send"><i class="fas fa-paper-plane"></i></button>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>
