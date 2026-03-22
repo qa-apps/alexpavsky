@@ -125,21 +125,22 @@ img { max-width: 100%; display: block; }
 .nav-link:hover { color: var(--text-primary); background: var(--glass); }
 
 .theme-toggle {
-    background: var(--glass);
-    border: 1px solid var(--border);
+    background: none;
+    border: none;
     color: var(--text-secondary);
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.95rem;
+    font-size: 1rem;
     transition: var(--transition);
-    margin-right: 0.5rem;
+    margin-right: 0.25rem;
+    outline: none;
 }
-.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.theme-toggle:hover { color: var(--accent); }
+.theme-toggle:focus { outline: none; }
 
 .nav-menu-btn {
     display: none;
