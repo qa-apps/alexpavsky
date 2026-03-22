@@ -28,25 +28,30 @@
 
     // ─── Theme Toggle ───
     var themeToggle = document.getElementById('theme-toggle');
-    var themeIcon = document.getElementById('theme-icon');
     var THEME_KEY = 'alexpavsky_theme';
     var savedTheme = localStorage.getItem(THEME_KEY) || 'dark';
-    if (savedTheme === 'light') {
-        document.documentElement.setAttribute('data-theme', 'light');
-        if (themeIcon) themeIcon.className = 'fas fa-sun';
+
+    function applyTheme(theme) {
+        var body = document.body;
+        var icon = themeToggle ? themeToggle.querySelector('i') : null;
+        if (theme === 'light') {
+            body.classList.add('light-mode');
+            if (icon) icon.className = 'fas fa-sun';
+        } else {
+            body.classList.remove('light-mode');
+            if (icon) icon.className = 'fas fa-moon';
+        }
+        localStorage.setItem(THEME_KEY, theme);
     }
+
+    applyTheme(savedTheme);
+
     if (themeToggle) {
         themeToggle.addEventListener('click', function () {
-            var isLight = document.documentElement.getAttribute('data-theme') === 'light';
-            if (isLight) {
-                document.documentElement.removeAttribute('data-theme');
-                if (themeIcon) themeIcon.className = 'fas fa-moon';
-                localStorage.setItem(THEME_KEY, 'dark');
-            } else {
-                document.documentElement.setAttribute('data-theme', 'light');
-                if (themeIcon) themeIcon.className = 'fas fa-sun';
-                localStorage.setItem(THEME_KEY, 'light');
-            }
+            var isLight = document.body.classList.contains('light-mode');
+            applyTheme(isLight ? 'dark' : 'light');
+            themeToggle.style.transform = 'scale(0.8)';
+            setTimeout(function () { themeToggle.style.transform = 'scale(1)'; }, 150);
         });
     }
 
