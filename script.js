@@ -36,10 +36,10 @@
         var icon = themeToggle ? themeToggle.querySelector('i') : null;
         if (theme === 'light') {
             body.classList.add('light-mode');
-            if (icon) icon.className = 'fas fa-sun';
+            if (icon) icon.className = 'fas fa-moon';
         } else {
             body.classList.remove('light-mode');
-            if (icon) icon.className = 'fas fa-moon';
+            if (icon) icon.className = 'fas fa-sun';
         }
         localStorage.setItem(THEME_KEY, theme);
     }

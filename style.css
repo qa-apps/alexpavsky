@@ -45,7 +45,40 @@ body.light-mode {
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.12);
 }
-body.light-mode .nav { background: rgba(245, 245, 247, 0.85); }
+body.light-mode .nav { background: rgba(245, 245, 247, 0.85); border-bottom-color: rgba(0,0,0,0.06); }
+body.light-mode .mobile-menu { background: rgba(245, 245, 247, 0.97); }
+body.light-mode .terminal-card { background: rgba(255, 255, 255, 0.9); }
+body.light-mode .terminal-bar { background: rgba(0, 0, 0, 0.03); }
+body.light-mode .terminal-dot.red { background: #ff6058; }
+body.light-mode .terminal-dot.yellow { background: #ffbd2e; }
+body.light-mode .terminal-dot.green { background: #27c93f; }
+body.light-mode .hero-bg .glow { opacity: 0.3; }
+body.light-mode .grid-overlay { opacity: 0.03; }
+body.light-mode .btn-glass { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.08); color: var(--text-primary); }
+body.light-mode .btn-glass:hover { background: rgba(0, 0, 0, 0.07); }
+body.light-mode .section-badge { background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.15); }
+body.light-mode .feed-card { background: var(--bg-card); }
+body.light-mode .feed-source { background: rgba(99, 102, 241, 0.06); }
+body.light-mode .tool-card { background: var(--bg-card); }
+body.light-mode .explore-card { background: var(--bg-card); }
+body.light-mode .lab-card { background: var(--bg-card); }
+body.light-mode .social-icon { background: rgba(34, 197, 94, 0.06); border-color: rgba(34, 197, 94, 0.2); }
+body.light-mode .chat-action-btn { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.08); }
+body.light-mode .chat-action-btn:hover { background: rgba(99, 102, 241, 0.08); }
+body.light-mode .message-content code { background: rgba(0, 0, 0, 0.06); }
+body.light-mode .message-content pre { background: rgba(0, 0, 0, 0.04); }
+body.light-mode .chat-inline-btn:hover { background: rgba(0, 0, 0, 0.06); }
+body.light-mode .chat-consent-icon { background: rgba(99, 102, 241, 0.08); }
+body.light-mode .chat-attachment-chip { background: rgba(99, 102, 241, 0.06); }
+body.light-mode .chat-input-container.drag-over { background: rgba(99, 102, 241, 0.05); }
+body.light-mode .modal-overlay { background: rgba(0, 0, 0, 0.4); }
+body.light-mode .modal-content { background: var(--bg-card); }
+body.light-mode .diff-add { background: rgba(16, 185, 129, 0.08); }
+body.light-mode .diff-remove { background: rgba(239, 68, 68, 0.08); }
+body.light-mode .tag { background: rgba(99, 102, 241, 0.06); border-color: rgba(99, 102, 241, 0.12); }
+body.light-mode .chat-avatar { background: rgba(99, 102, 241, 0.15); }
+body.light-mode .chat-header-btn:hover,
+body.light-mode .chat-close-btn:hover { background: rgba(0, 0, 0, 0.08); }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
