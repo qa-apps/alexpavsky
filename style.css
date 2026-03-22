@@ -727,7 +727,8 @@ img { max-width: 100%; display: block; }
     box-shadow: var(--shadow);
 }
 
-.tool-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+.tool-icon { font-size: 2rem; margin-bottom: 0.75rem; line-height: 0; }
+.tool-icon img { border-radius: 10px; object-fit: contain; }
 
 .tool-card h4 {
     font-size: 0.85rem;
