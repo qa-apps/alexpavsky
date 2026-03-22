@@ -33,6 +33,12 @@ def _init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_logs(session_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_time ON chat_logs(created_at)")
+    c.execute("""CREATE TABLE IF NOT EXISTS subscribers (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        ip_hash TEXT,
+        created_at REAL NOT NULL
+    )""")
     conn.commit()
     conn.close()
 
@@ -432,6 +438,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if self.path == "/api/subscribe":
+            return self._handle_subscribe()
         if self.path != "/api/chat":
             self._json(404, {"error": "not_found"})
             return
@@ -498,6 +506,40 @@ class Handler(SimpleHTTPRequestHandler):
         if warning:
             result["warning"] = warning
         self._json(200, result, new_session)
+
+
+    def _handle_subscribe(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length > 4096:
+            self._json(413, {"error": "payload_too_large"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        email = (body.get("email") or "").strip().lower()
+        if not email or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+            self._json(400, {"error": "Invalid email address."})
+            return
+        ip_hash = _hash_ip(self._client_ip())
+        try:
+            with _db_lock:
+                conn = sqlite3.connect(str(DB_PATH))
+                conn.execute(
+                    "INSERT OR IGNORE INTO subscribers (id, email, ip_hash, created_at) VALUES (?, ?, ?, ?)",
+                    (uuid.uuid4().hex, email, ip_hash, time.time()),
+                )
+                conn.commit()
+                conn.close()
+            log.info("subscriber: %s ip=%s", email[:3] + '***', ip_hash[:8])
+            self._json(200, {"message": "You're subscribed! We'll send you the latest AI & QA news."})
+        except Exception as e:
+            log.warning("subscribe error: %s", e)
+            self._json(500, {"error": "Server error. Please try again."})
 
 
 def main():

@@ -436,6 +436,39 @@
         });
     }
 
+    // ─── Newsletter ───
+    var newsletterForm = document.getElementById('newsletter-form');
+    var newsletterEmail = document.getElementById('newsletter-email');
+    var newsletterMsg = document.getElementById('newsletter-msg');
+    if (newsletterForm) {
+        newsletterForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            var email = newsletterEmail.value.trim();
+            if (!email) return;
+            newsletterMsg.textContent = '';
+            newsletterMsg.className = 'newsletter-msg';
+            try {
+                var res = await fetch('/api/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email })
+                });
+                var data = await res.json();
+                if (res.ok) {
+                    newsletterMsg.textContent = data.message || 'Subscribed!';
+                    newsletterMsg.className = 'newsletter-msg success';
+                    newsletterEmail.value = '';
+                } else {
+                    newsletterMsg.textContent = data.error || 'Something went wrong.';
+                    newsletterMsg.className = 'newsletter-msg error';
+                }
+            } catch (err) {
+                newsletterMsg.textContent = 'Network error. Try again.';
+                newsletterMsg.className = 'newsletter-msg error';
+            }
+        });
+    }
+
     // ─── Diff Checker ───
     var diffModal = document.getElementById('diff-modal');
     var openDiffBtn = document.getElementById('open-diff-btn');
