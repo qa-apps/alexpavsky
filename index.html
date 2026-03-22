@@ -321,7 +321,7 @@
                 <a href="mailto:alex@alexpavsky.com" class="footer-contact-btn"><i class="fas fa-envelope"></i> Contact</a>
                 <div class="footer-socials">
                     <a href="https://github.com/qa-apps" target="_blank" rel="noopener" class="social-icon" aria-label="GitHub"><i class="fab fa-github"></i></a>
-                    <a href="https://linkedin.com/in/alexpavsky" target="_blank" rel="noopener" class="social-icon" aria-label="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
+                    <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon" aria-label="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
                     <a href="mailto:alex@alexpavsky.com" class="social-icon" aria-label="Email"><i class="fas fa-envelope"></i></a>
                 </div>
             </div>
@@ -351,15 +351,71 @@
                 </div>
             </div>
             <div class="chat-consent" id="chat-consent">
-                <div class="chat-consent-inner">
+                <div class="chat-consent-inner" id="chat-consent-main">
                     <div class="chat-consent-icon"><i class="fas fa-shield-halved"></i></div>
                     <h4>Before we start</h4>
-                    <p>This AI chat is for informational purposes only. Responses may be inaccurate or incomplete. Do not share sensitive personal data. Chat logs may be stored for quality and safety.</p>
+                    <p>This AI chat is for informational purposes only. Responses may be inaccurate or incomplete. Do not share sensitive personal data.</p>
                     <label class="chat-consent-check">
                         <input type="checkbox" id="chat-consent-cb">
-                        <span>I agree to the <a href="mailto:alex@alexpavsky.com">terms of use</a> and understand AI limitations</span>
+                        <span>I agree to the <a href="#" id="chat-terms-link">terms of use</a> and understand AI limitations</span>
                     </label>
-                    <button type="button" id="chat-consent-btn" class="chat-consent-agree" disabled>Agree & Start Chat</button>
+                    <button type="button" id="chat-consent-btn" class="chat-consent-agree" disabled>Agree &amp; Start Chat</button>
+                </div>
+                <div class="chat-terms-panel hidden" id="chat-terms-panel">
+                    <button type="button" class="chat-terms-back" id="chat-terms-back"><i class="fas fa-arrow-left"></i> Back</button>
+                    <div class="chat-terms-scroll">
+                        <h4>AI Chat Terms of Use</h4>
+                        <div class="chat-terms-section">
+                            <h5>1. Purpose and important disclaimers</h5>
+                            <ul>
+                                <li>This AI chat is offered for informational purposes only. It can be wrong, incomplete, out of date, biased, or unsuitable for your situation.</li>
+                                <li>You must independently verify all output before relying on it for business, legal, medical, technical, financial, or operational decisions.</li>
+                                <li>Alex Pavsky does not guarantee accuracy, merchantability, fitness for a particular purpose, or uninterrupted operation.</li>
+                            </ul>
+                        </div>
+                        <div class="chat-terms-section">
+                            <h5>2. Service characteristics</h5>
+                            <ul>
+                                <li>Output may be fabricated, misleading, offensive, incomplete, delayed, unavailable, or inconsistent between sessions.</li>
+                                <li>The service may summarise, translate, infer, classify, route, transform, or truncate your input in ways that are imperfect.</li>
+                                <li>The service may rely on third-party AI models, hosting, moderation, storage, networking, and security tools.</li>
+                                <li>Availability, latency, routing, output style, safety filtering, feature access, and data retention may change without prior notice.</li>
+                            </ul>
+                        </div>
+                        <div class="chat-terms-section">
+                            <h5>3. Your responsibilities and prohibited use</h5>
+                            <ul>
+                                <li>You are solely responsible for what you submit, ask, upload, copy, export, implement, publish, or rely on.</li>
+                                <li>You must not use the AI chat for unlawful conduct, harassment, fraud, impersonation, defamation, malware, intrusion, exploitation of minors, harmful instructions, or infringement of third-party rights.</li>
+                                <li>You must not submit content that you do not have the right to use, disclose, process, or transfer.</li>
+                                <li>You should not submit highly sensitive personal data, confidential information, trade secrets, protected health information, payment card data, or government identifiers.</li>
+                            </ul>
+                        </div>
+                        <div class="chat-terms-section">
+                            <h5>4. Logging, monitoring, security, and authentication</h5>
+                            <ul>
+                                <li>Chat prompts, outputs, attachments, timestamps, device/browser information, session identifiers, IP-derived identifiers, and related usage logs may be collected, reviewed, stored, and used for safety, abuse prevention, fraud prevention, troubleshooting, analytics, quality control, audit, compliance, and service improvement.</li>
+                                <li>Session logs and related technical records may be used where reasonably necessary to verify access, investigate suspicious activity, maintain session continuity, or protect the platform.</li>
+                                <li>Automated and human review may be used where appropriate for moderation, support, investigation, or legal obligations.</li>
+                                <li>By continuing, you consent to this processing as described in these Terms.</li>
+                            </ul>
+                        </div>
+                        <div class="chat-terms-section">
+                            <h5>5. Liability and warranties</h5>
+                            <ul>
+                                <li>To the fullest extent permitted by applicable law, the AI chat is provided on an "as is" and "as available" basis without warranties of any kind.</li>
+                                <li>Alex Pavsky disclaims liability for losses arising from use of, inability to use, or reliance on AI outputs, including indirect, incidental, special, consequential, or financial losses.</li>
+                            </ul>
+                        </div>
+                        <div class="chat-terms-section">
+                            <h5>6. Jurisdiction</h5>
+                            <ul>
+                                <li><strong>USA:</strong> The AI feature is offered for informational purposes, not as professional advice. Use remains subject to logging, safety review, and platform security.</li>
+                                <li><strong>EU/EEA:</strong> The AI system may process personal data and interaction logs as described. Do not rely on AI output as a substitute for professional review.</li>
+                                <li><strong>International:</strong> If you access from any other jurisdiction, you are responsible for ensuring lawful use. Cross-border processing and record retention may occur.</li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="chat-messages" id="chat-messages">

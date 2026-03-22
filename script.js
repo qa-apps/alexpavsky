@@ -490,6 +490,25 @@
 
         if (hasConsent && chatConsent) chatConsent.classList.add('hidden');
 
+        var chatTermsLink = document.getElementById('chat-terms-link');
+        var chatTermsPanel = document.getElementById('chat-terms-panel');
+        var chatTermsBack = document.getElementById('chat-terms-back');
+        var chatConsentMain = document.getElementById('chat-consent-main');
+
+        if (chatTermsLink) {
+            chatTermsLink.addEventListener('click', function (e) {
+                e.preventDefault();
+                if (chatConsentMain) chatConsentMain.classList.add('hidden');
+                if (chatTermsPanel) chatTermsPanel.classList.remove('hidden');
+            });
+        }
+        if (chatTermsBack) {
+            chatTermsBack.addEventListener('click', function () {
+                if (chatTermsPanel) chatTermsPanel.classList.add('hidden');
+                if (chatConsentMain) chatConsentMain.classList.remove('hidden');
+            });
+        }
+
         if (chatConsentCb && chatConsentBtn) {
             chatConsentCb.addEventListener('change', function () {
                 chatConsentBtn.disabled = !chatConsentCb.checked;

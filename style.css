@@ -1153,6 +1153,34 @@ img { max-width: 100%; display: block; }
 .chat-consent-agree:disabled { opacity: 0.4; cursor: not-allowed; }
 .chat-consent-agree:not(:disabled):hover { transform: scale(1.02); box-shadow: 0 4px 16px rgba(99,102,241,0.4); }
 
+.chat-terms-panel {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column; background: var(--bg-secondary);
+}
+.chat-terms-panel.hidden { display: none; }
+.chat-terms-back {
+    display: flex; align-items: center; gap: 0.4rem; padding: 0.6rem 0.75rem;
+    background: none; border: none; border-bottom: 1px solid var(--border);
+    color: var(--accent); font-size: 0.8rem; cursor: pointer; font-family: var(--font);
+    flex-shrink: 0;
+}
+.chat-terms-back:hover { color: #fff; }
+.chat-terms-scroll {
+    flex: 1; overflow-y: auto; padding: 1rem; font-size: 0.72rem;
+    color: var(--text-secondary); line-height: 1.6;
+}
+.chat-terms-scroll h4 {
+    font-size: 0.9rem; color: var(--text-primary); margin-bottom: 0.8rem;
+}
+.chat-terms-section { margin-bottom: 0.8rem; }
+.chat-terms-section h5 {
+    font-size: 0.78rem; color: var(--accent); margin-bottom: 0.3rem;
+}
+.chat-terms-section ul {
+    margin: 0; padding-left: 1.1rem; list-style: disc;
+}
+.chat-terms-section li { margin-bottom: 0.25rem; }
+
 .chat-form {
     display: flex; gap: 0.5rem; padding: 0.6rem 0.75rem;
     align-items: center; background: var(--bg-secondary);
