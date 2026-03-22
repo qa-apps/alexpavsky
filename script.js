@@ -217,30 +217,23 @@
 
     function displayArticles() {
         var grid = document.getElementById('feed-grid');
-        var loadMoreBtn = document.getElementById('load-more-btn');
         if (!grid) return;
 
         var filtered = currentFilter === 'all'
             ? allArticles
             : allArticles.filter(function (a) { return a.category === currentFilter; });
 
-        var toShow = filtered.slice(0, displayedCount + ARTICLES_PER_PAGE);
+        var toShow = filtered.slice(0, 6);
         grid.innerHTML = '';
 
         if (toShow.length === 0) {
             grid.innerHTML = '<div class="feed-loading"><p>No articles found. Check back later.</p></div>';
-            if (loadMoreBtn) loadMoreBtn.style.display = 'none';
             return;
         }
 
         toShow.forEach(function (article) {
             grid.appendChild(renderArticle(article));
         });
-
-        displayedCount = toShow.length;
-        if (loadMoreBtn) {
-            loadMoreBtn.style.display = displayedCount < filtered.length ? 'inline-flex' : 'none';
-        }
     }
 
     async function loadAllFeeds() {
@@ -346,12 +339,6 @@
         });
     });
 
-    var loadMoreBtn = document.getElementById('load-more-btn');
-    if (loadMoreBtn) {
-        loadMoreBtn.addEventListener('click', function () {
-            displayArticles();
-        });
-    }
 
     // ─── JSON Formatter ───
     var jsonModal = document.getElementById('json-modal');
