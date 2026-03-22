@@ -768,16 +768,35 @@ img { max-width: 100%; display: block; }
 }
 
 .lab-icon {
-    width: 48px;
-    height: 48px;
+    width: 56px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(99, 102, 241, 0.1);
-    border-radius: 12px;
-    font-size: 1.2rem;
-    color: var(--accent);
+    border-radius: 14px;
+    font-size: 1.4rem;
     margin-bottom: 1.25rem;
+    position: relative;
+    animation: labIconPulse 3s ease-in-out infinite;
+}
+.lab-card:nth-child(1) .lab-icon {
+    background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(6,182,212,0.25));
+    color: #6366f1;
+    box-shadow: 0 0 20px rgba(99,102,241,0.2);
+}
+.lab-card:nth-child(2) .lab-icon {
+    background: linear-gradient(135deg, rgba(245,158,11,0.25), rgba(239,68,68,0.18));
+    color: #f59e0b;
+    box-shadow: 0 0 20px rgba(245,158,11,0.2);
+}
+.lab-card:nth-child(3) .lab-icon {
+    background: linear-gradient(135deg, rgba(16,185,129,0.25), rgba(6,182,212,0.18));
+    color: #10b981;
+    box-shadow: 0 0 20px rgba(16,185,129,0.2);
+}
+@keyframes labIconPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
 }
 
 .lab-card h3 {
