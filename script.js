@@ -5,10 +5,19 @@
         { name: 'The Gradient', url: 'https://thegradient.pub/rss/', category: 'ai' },
         { name: 'Hugging Face', url: 'https://huggingface.co/blog/feed.xml', category: 'ai' },
         { name: 'AI Weirdness', url: 'https://www.aiweirdness.com/rss/', category: 'ai' },
-        { name: 'Martin Fowler', url: 'https://martinfowler.com/feed.atom', category: 'dev' },
-        { name: 'Ministry of Testing', url: 'https://www.ministryoftesting.com/feeds/blogs', category: 'qa' },
         { name: 'Google AI Blog', url: 'https://blog.google/technology/ai/rss/', category: 'ai' },
         { name: 'OpenAI Blog', url: 'https://openai.com/blog/rss.xml', category: 'ai' },
+        { name: 'Ministry of Testing', url: 'https://www.ministryoftesting.com/feeds/blogs', category: 'qa' },
+        { name: 'Software Testing Help', url: 'https://www.softwaretestinghelp.com/feed/', category: 'qa' },
+        { name: 'Sauce Labs', url: 'https://saucelabs.com/blog/rss.xml', category: 'qa' },
+        { name: 'Test Automation University', url: 'https://testautomationu.applitools.com/rss.xml', category: 'qa' },
+        { name: 'QA Lead', url: 'https://theqalead.com/feed/', category: 'qa' },
+        { name: 'LambdaTest Blog', url: 'https://www.lambdatest.com/blog/feed/', category: 'qa' },
+        { name: 'Martin Fowler', url: 'https://martinfowler.com/feed.atom', category: 'dev' },
+        { name: 'Dev.to', url: 'https://dev.to/feed', category: 'dev' },
+        { name: 'CSS-Tricks', url: 'https://css-tricks.com/feed/', category: 'dev' },
+        { name: 'Smashing Magazine', url: 'https://www.smashingmagazine.com/feed/', category: 'dev' },
+        { name: 'The Pragmatic Engineer', url: 'https://blog.pragmaticengineer.com/rss/', category: 'dev' },
     ];
 
     const CORS_PROXY = 'https://api.rss2json.com/v1/api.json?rss_url=';
