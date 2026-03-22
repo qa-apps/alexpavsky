@@ -224,6 +224,19 @@
         return div.innerHTML;
     }
 
+    function pickUniqueBySource(articles, max) {
+        var seen = {};
+        var result = [];
+        for (var i = 0; i < articles.length && result.length < max; i++) {
+            var src = articles[i].source;
+            if (!seen[src]) {
+                seen[src] = true;
+                result.push(articles[i]);
+            }
+        }
+        return result;
+    }
+
     function displayArticles() {
         var grid = document.getElementById('feed-grid');
         if (!grid) return;
@@ -232,7 +245,7 @@
             ? allArticles
             : allArticles.filter(function (a) { return a.category === currentFilter; });
 
-        var toShow = filtered.slice(0, 6);
+        var toShow = pickUniqueBySource(filtered, 6);
         grid.innerHTML = '';
 
         if (toShow.length === 0) {
