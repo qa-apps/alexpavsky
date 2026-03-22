@@ -26,6 +26,30 @@
     const ARTICLES_PER_PAGE = 9;
     let currentFilter = 'all';
 
+    // ─── Theme Toggle ───
+    var themeToggle = document.getElementById('theme-toggle');
+    var themeIcon = document.getElementById('theme-icon');
+    var THEME_KEY = 'alexpavsky_theme';
+    var savedTheme = localStorage.getItem(THEME_KEY) || 'dark';
+    if (savedTheme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+        if (themeIcon) themeIcon.className = 'fas fa-sun';
+    }
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+            if (isLight) {
+                document.documentElement.removeAttribute('data-theme');
+                if (themeIcon) themeIcon.className = 'fas fa-moon';
+                localStorage.setItem(THEME_KEY, 'dark');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'light');
+                if (themeIcon) themeIcon.className = 'fas fa-sun';
+                localStorage.setItem(THEME_KEY, 'light');
+            }
+        });
+    }
+
     // ─── Nav ───
     const navMenuBtn = document.getElementById('nav-menu-btn');
     const mobileMenu = document.getElementById('mobile-menu');
