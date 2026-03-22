@@ -39,6 +39,27 @@ def _init_db():
         ip_hash TEXT,
         created_at REAL NOT NULL
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS forum_posts (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
     conn.commit()
     conn.close()
 
@@ -59,6 +80,28 @@ def _log_message(session_id, ip_hash, role, message, model=None):
 
 def _hash_ip(ip):
     return hashlib.sha256((ip or "unknown").encode()).hexdigest()[:16]
+
+
+def _hash_pw(password):
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _db():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _get_user_by_token(token):
+    if not token:
+        return None
+    conn = _db()
+    row = conn.execute(
+        "SELECT u.* FROM users u JOIN sessions s ON u.id = s.user_id WHERE s.token = ?",
+        (token,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 _init_db()
@@ -404,8 +447,8 @@ class Handler(SimpleHTTPRequestHandler):
     def _cors(self):
         origin = self.headers.get("Origin", "*")
         self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Credentials", "true")
 
     def _get_session(self):
@@ -431,6 +474,31 @@ class Handler(SimpleHTTPRequestHandler):
         forwarded = self.headers.get("X-Forwarded-For", "")
         return forwarded.split(",")[0].strip() if forwarded else self.client_address[0]
 
+    def _get_token(self):
+        auth = self.headers.get("Authorization", "")
+        return auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        return json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+
+    def do_GET(self):
+        if self.path == "/api/auth/me":
+            user = _get_user_by_token(self._get_token())
+            if not user:
+                self._json(401, {"error": "not_authenticated"})
+                return
+            self._json(200, {"id": user["id"], "name": user["name"], "email": user["email"]})
+            return
+        if self.path == "/api/forum/posts":
+            conn = _db()
+            rows = conn.execute("SELECT id, user_id, user_name, text, created_at FROM forum_posts ORDER BY created_at DESC LIMIT 50").fetchall()
+            conn.close()
+            posts = [{"id": r["id"], "user_name": r["user_name"], "text": r["text"], "created_at": r["created_at"]} for r in rows]
+            self._json(200, {"posts": posts})
+            return
+        super().do_GET()
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors()
@@ -440,6 +508,14 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/subscribe":
             return self._handle_subscribe()
+        if self.path == "/api/auth/register":
+            return self._handle_register()
+        if self.path == "/api/auth/login":
+            return self._handle_login()
+        if self.path == "/api/auth/logout":
+            return self._handle_logout()
+        if self.path == "/api/forum/posts":
+            return self._handle_forum_post()
         if self.path != "/api/chat":
             self._json(404, {"error": "not_found"})
             return
@@ -540,6 +616,92 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             log.warning("subscribe error: %s", e)
             self._json(500, {"error": "Server error. Please try again."})
+
+
+    def _handle_register(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        name = (body.get("name") or "").strip()
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        if not name or not email or len(password) < 6:
+            self._json(400, {"error": "Name, email, and password (min 6 chars) required."})
+            return
+        conn = _db()
+        if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+            conn.close()
+            self._json(409, {"error": "Email already registered."})
+            return
+        uid = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (uid, name, email, _hash_pw(password), time.time())
+        )
+        token = uuid.uuid4().hex
+        conn.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)", (token, uid, time.time()))
+        conn.commit()
+        conn.close()
+        log.info("register: %s", email[:3] + "***")
+        self._json(200, {"token": token, "user": {"id": uid, "name": name, "email": email}})
+
+    def _handle_login(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        conn = _db()
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        if not row or row["password_hash"] != _hash_pw(password):
+            conn.close()
+            self._json(401, {"error": "Invalid email or password."})
+            return
+        user = dict(row)
+        token = uuid.uuid4().hex
+        conn.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)", (token, user["id"], time.time()))
+        conn.commit()
+        conn.close()
+        log.info("login: %s", email[:3] + "***")
+        self._json(200, {"token": token, "user": {"id": user["id"], "name": user["name"], "email": user["email"]}})
+
+    def _handle_logout(self):
+        token = self._get_token()
+        if token:
+            conn = _db()
+            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            conn.commit()
+            conn.close()
+        self._json(200, {"ok": True})
+
+    def _handle_forum_post(self):
+        user = _get_user_by_token(self._get_token())
+        if not user:
+            self._json(401, {"error": "Login required to post."})
+            return
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        text = (body.get("text") or "").strip()
+        if not text or len(text) > 2000:
+            self._json(400, {"error": "Message required (max 2000 chars)."})
+            return
+        pid = uuid.uuid4().hex
+        now = time.time()
+        conn = _db()
+        conn.execute(
+            "INSERT INTO forum_posts (id, user_id, user_name, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            (pid, user["id"], user["name"], text, now)
+        )
+        conn.commit()
+        conn.close()
+        self._json(200, {"post": {"id": pid, "user_name": user["name"], "text": text, "created_at": now}})
 
 
 def main():

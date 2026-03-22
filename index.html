@@ -25,13 +25,27 @@
                 <a href="#explore" class="nav-link">Explore</a>
                 <a href="#tools" class="nav-link">Tools</a>
                 <a href="#lab" class="nav-link">Lab</a>
+                <a href="#forum" class="nav-link">Forum</a>
             </div>
-            <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
-                <i class="fas fa-moon" id="theme-icon"></i>
-            </button>
-            <button class="nav-menu-btn" id="nav-menu-btn" aria-label="Menu">
-                <i class="fas fa-bars"></i>
-            </button>
+            <div class="nav-actions">
+                <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="auth-btn" id="auth-btn" aria-label="Login">
+                    <i class="fas fa-user"></i> <span class="auth-btn-label">Login</span>
+                </button>
+                <div class="user-menu" id="user-menu" style="display:none;">
+                    <button class="user-menu-toggle" id="user-menu-toggle">
+                        <i class="fas fa-user-circle"></i> <span id="user-display-name"></span>
+                    </button>
+                    <div class="user-dropdown" id="user-dropdown">
+                        <a href="#" id="user-logout-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                    </div>
+                </div>
+                <button class="nav-menu-btn" id="nav-menu-btn" aria-label="Menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
         </div>
     </nav>
 
@@ -40,6 +54,7 @@
         <a href="#explore" class="mobile-link">Explore</a>
         <a href="#tools" class="mobile-link">Tools</a>
         <a href="#lab" class="mobile-link">Lab</a>
+        <a href="#forum" class="mobile-link">Forum</a>
     </div>
 
     <header class="hero" id="hero">
@@ -313,6 +328,28 @@
         </div>
     </div>
 
+    <section class="section" id="forum">
+        <div class="container">
+            <div class="section-header">
+                <div class="section-badge">
+                    <i class="fas fa-comments"></i> Community
+                </div>
+                <h2 class="section-title">Forum</h2>
+                <p class="section-desc">Share ideas, ask questions, discuss AI & QA topics.</p>
+            </div>
+            <div class="forum-compose" id="forum-compose">
+                <textarea id="forum-input" class="forum-input" placeholder="Write a message... (login required)" maxlength="2000"></textarea>
+                <div class="forum-compose-actions">
+                    <span class="forum-char-count" id="forum-char-count">0 / 2000</span>
+                    <button class="btn btn-primary btn-sm" id="forum-post-btn">Post</button>
+                </div>
+            </div>
+            <div class="forum-posts" id="forum-posts">
+                <div class="feed-loading"><div class="spinner"></div><p>Loading posts...</p></div>
+            </div>
+        </div>
+    </section>
+
     <footer class="footer">
         <div class="container">
             <div class="footer-inner">
@@ -459,6 +496,48 @@
                     <button type="submit" class="chat-send-btn" aria-label="Send"><i class="fas fa-paper-plane"></i></button>
                 </form>
             </div>
+        </div>
+    </div>
+
+    <div class="auth-overlay" id="auth-overlay">
+        <div class="auth-modal">
+            <button class="auth-modal-close" id="auth-modal-close"><i class="fas fa-times"></i></button>
+            <div class="auth-tabs">
+                <button class="auth-tab active" data-tab="login">Login</button>
+                <button class="auth-tab" data-tab="register">Register</button>
+            </div>
+            <form id="login-form" class="auth-form">
+                <div class="auth-field">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" required placeholder="your@email.com" autocomplete="email">
+                </div>
+                <div class="auth-field">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required placeholder="Your password" minlength="6" autocomplete="current-password">
+                </div>
+                <div class="auth-error" id="login-error"></div>
+                <button type="submit" class="auth-submit">Login</button>
+            </form>
+            <form id="register-form" class="auth-form" style="display:none;">
+                <div class="auth-field">
+                    <label for="reg-name">Full Name</label>
+                    <input type="text" id="reg-name" required placeholder="John Doe" autocomplete="name">
+                </div>
+                <div class="auth-field">
+                    <label for="reg-email">Email</label>
+                    <input type="email" id="reg-email" required placeholder="your@email.com" autocomplete="email">
+                </div>
+                <div class="auth-field">
+                    <label for="reg-password">Password</label>
+                    <input type="password" id="reg-password" required placeholder="Min 6 characters" minlength="6" autocomplete="new-password">
+                </div>
+                <div class="auth-field">
+                    <label for="reg-password2">Confirm Password</label>
+                    <input type="password" id="reg-password2" required placeholder="Repeat password" minlength="6" autocomplete="new-password">
+                </div>
+                <div class="auth-error" id="register-error"></div>
+                <button type="submit" class="auth-submit">Create Account</button>
+            </form>
         </div>
     </div>
 

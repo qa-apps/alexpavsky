@@ -1048,6 +1048,111 @@ img { max-width: 100%; display: block; }
     border-color: var(--success);
 }
 
+/* ─── Nav Actions ─── */
+.nav-actions { display: flex; align-items: center; gap: 0.25rem; }
+
+.auth-btn {
+    background: var(--glass); border: 1px solid var(--border); color: var(--text-primary);
+    padding: 0.4rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+    font-weight: 500; font-family: var(--font); transition: var(--transition);
+    display: flex; align-items: center; gap: 0.4rem;
+}
+.auth-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.user-menu { position: relative; }
+.user-menu-toggle {
+    background: var(--glass); border: 1px solid var(--border); color: var(--text-primary);
+    padding: 0.4rem 0.8rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+    font-family: var(--font); display: flex; align-items: center; gap: 0.4rem; transition: var(--transition);
+}
+.user-menu-toggle:hover { border-color: var(--accent); }
+.user-dropdown {
+    display: none; position: absolute; top: calc(100% + 6px); right: 0;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.4rem; min-width: 140px; box-shadow: var(--shadow-lg); z-index: 100;
+}
+.user-dropdown.open { display: block; }
+.user-dropdown a {
+    display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem;
+    border-radius: 6px; font-size: 0.85rem; color: var(--text-secondary); transition: var(--transition);
+}
+.user-dropdown a:hover { background: var(--glass); color: var(--text-primary); }
+
+/* ─── Auth Modal ─── */
+.auth-overlay {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
+    align-items: center; justify-content: center;
+}
+.auth-overlay.open { display: flex; }
+.auth-modal {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 2rem; width: 90%; max-width: 400px; position: relative;
+    box-shadow: var(--shadow-lg);
+}
+.auth-modal-close {
+    position: absolute; top: 0.75rem; right: 0.75rem; background: none; border: none;
+    color: var(--text-dim); font-size: 1.2rem; cursor: pointer; transition: var(--transition);
+}
+.auth-modal-close:hover { color: var(--text-primary); }
+.auth-tabs { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+.auth-tab {
+    flex: 1; background: none; border: none; padding: 0.75rem; cursor: pointer;
+    font-size: 0.9rem; font-weight: 600; font-family: var(--font);
+    color: var(--text-dim); border-bottom: 2px solid transparent; transition: var(--transition);
+}
+.auth-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.auth-field { margin-bottom: 1rem; }
+.auth-field label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+.auth-field input {
+    width: 100%; padding: 0.6rem 0.8rem; background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; font-family: var(--font);
+    outline: none; transition: var(--transition);
+}
+.auth-field input:focus { border-color: var(--accent); }
+.auth-field input::placeholder { color: var(--text-dim); }
+.auth-error { color: var(--danger); font-size: 0.8rem; min-height: 1.2em; margin-bottom: 0.5rem; }
+.auth-submit {
+    width: 100%; padding: 0.7rem; background: var(--gradient); border: none;
+    border-radius: 8px; color: #fff; font-size: 0.9rem; font-weight: 600;
+    font-family: var(--font); cursor: pointer; transition: var(--transition);
+}
+.auth-submit:hover { opacity: 0.9; transform: translateY(-1px); }
+.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ─── Forum ─── */
+.forum-compose {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1rem; margin-bottom: 1.5rem;
+}
+.forum-input {
+    width: 100%; min-height: 80px; background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.75rem; color: var(--text-primary); font-size: 0.9rem;
+    font-family: var(--font); resize: vertical; outline: none; transition: var(--transition);
+}
+.forum-input:focus { border-color: var(--accent); }
+.forum-input::placeholder { color: var(--text-dim); }
+.forum-compose-actions {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;
+}
+.forum-char-count { font-size: 0.75rem; color: var(--text-dim); }
+.forum-posts { display: flex; flex-direction: column; gap: 0.75rem; }
+.forum-post {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1rem; transition: var(--transition);
+}
+.forum-post:hover { border-color: var(--border-hover); }
+.forum-post-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.forum-post-avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--gradient);
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
+}
+.forum-post-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.forum-post-time { font-size: 0.75rem; color: var(--text-dim); margin-left: auto; }
+.forum-post-text { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5; }
+.forum-empty { text-align: center; padding: 2rem; color: var(--text-dim); font-size: 0.9rem; }
+
 /* ─── Chat Widget ─── */
 .chat-widget { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
 

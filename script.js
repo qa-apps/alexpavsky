@@ -469,6 +469,225 @@
         });
     }
 
+    // ─── Auth ───
+    var authBtn = document.getElementById('auth-btn');
+    var userMenu = document.getElementById('user-menu');
+    var userMenuToggle = document.getElementById('user-menu-toggle');
+    var userDropdown = document.getElementById('user-dropdown');
+    var userDisplayName = document.getElementById('user-display-name');
+    var authOverlay = document.getElementById('auth-overlay');
+    var authModalClose = document.getElementById('auth-modal-close');
+    var loginForm = document.getElementById('login-form');
+    var registerForm = document.getElementById('register-form');
+    var loginError = document.getElementById('login-error');
+    var registerError = document.getElementById('register-error');
+
+    var authToken = localStorage.getItem('auth_token') || '';
+    var currentUser = null;
+
+    function authHeaders() {
+        return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken };
+    }
+
+    function setLoggedIn(user, token) {
+        authToken = token;
+        currentUser = user;
+        localStorage.setItem('auth_token', token);
+        if (authBtn) authBtn.style.display = 'none';
+        if (userMenu) userMenu.style.display = '';
+        if (userDisplayName) userDisplayName.textContent = user.name.split(' ')[0];
+    }
+
+    function setLoggedOut() {
+        authToken = '';
+        currentUser = null;
+        localStorage.removeItem('auth_token');
+        if (authBtn) authBtn.style.display = '';
+        if (userMenu) userMenu.style.display = 'none';
+        if (userDropdown) userDropdown.classList.remove('open');
+    }
+
+    function openAuthModal(tab) {
+        authOverlay.classList.add('open');
+        if (loginError) loginError.textContent = '';
+        if (registerError) registerError.textContent = '';
+        document.querySelectorAll('.auth-tab').forEach(function(t) {
+            t.classList.toggle('active', t.dataset.tab === tab);
+        });
+        if (loginForm) loginForm.style.display = tab === 'login' ? '' : 'none';
+        if (registerForm) registerForm.style.display = tab === 'register' ? '' : 'none';
+    }
+
+    function closeAuthModal() { if (authOverlay) authOverlay.classList.remove('open'); }
+
+    if (authToken) {
+        fetch('/api/auth/me', { headers: authHeaders() })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.id) setLoggedIn(data, authToken);
+                else setLoggedOut();
+            })
+            .catch(function() { setLoggedOut(); });
+    }
+
+    if (authBtn) authBtn.addEventListener('click', function() { openAuthModal('login'); });
+    if (authModalClose) authModalClose.addEventListener('click', closeAuthModal);
+    if (authOverlay) authOverlay.addEventListener('click', function(e) { if (e.target === authOverlay) closeAuthModal(); });
+
+    document.querySelectorAll('.auth-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() { openAuthModal(tab.dataset.tab); });
+    });
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            loginError.textContent = '';
+            var email = document.getElementById('login-email').value;
+            var password = document.getElementById('login-password').value;
+            var btn = loginForm.querySelector('.auth-submit');
+            btn.disabled = true;
+            fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email, password: password })
+            })
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(res) {
+                btn.disabled = false;
+                if (!res.ok) { loginError.textContent = res.data.error || 'Login failed.'; return; }
+                setLoggedIn(res.data.user, res.data.token);
+                closeAuthModal();
+                loginForm.reset();
+                loadForumPosts();
+            })
+            .catch(function() { btn.disabled = false; loginError.textContent = 'Network error.'; });
+        });
+    }
+
+    if (registerForm) {
+        registerForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            registerError.textContent = '';
+            var name = document.getElementById('reg-name').value;
+            var email = document.getElementById('reg-email').value;
+            var pw = document.getElementById('reg-password').value;
+            var pw2 = document.getElementById('reg-password2').value;
+            if (pw !== pw2) { registerError.textContent = 'Passwords do not match.'; return; }
+            var btn = registerForm.querySelector('.auth-submit');
+            btn.disabled = true;
+            fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, email: email, password: pw })
+            })
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(res) {
+                btn.disabled = false;
+                if (!res.ok) { registerError.textContent = res.data.error || 'Registration failed.'; return; }
+                setLoggedIn(res.data.user, res.data.token);
+                closeAuthModal();
+                registerForm.reset();
+                loadForumPosts();
+            })
+            .catch(function() { btn.disabled = false; registerError.textContent = 'Network error.'; });
+        });
+    }
+
+    if (userMenuToggle) {
+        userMenuToggle.addEventListener('click', function() { userDropdown.classList.toggle('open'); });
+    }
+    document.addEventListener('click', function(e) {
+        if (userMenu && !userMenu.contains(e.target)) {
+            if (userDropdown) userDropdown.classList.remove('open');
+        }
+    });
+    var logoutLink = document.getElementById('user-logout-link');
+    if (logoutLink) {
+        logoutLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {});
+            setLoggedOut();
+        });
+    }
+
+    // ─── Forum ───
+    var forumPosts = document.getElementById('forum-posts');
+    var forumInput = document.getElementById('forum-input');
+    var forumPostBtn = document.getElementById('forum-post-btn');
+    var forumCharCount = document.getElementById('forum-char-count');
+
+    if (forumInput && forumCharCount) {
+        forumInput.addEventListener('input', function() {
+            forumCharCount.textContent = forumInput.value.length + ' / 2000';
+        });
+    }
+
+    function timeAgo(ts) {
+        var diff = Math.floor(Date.now() / 1000 - ts);
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+        return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function renderForumPost(post) {
+        var initials = (post.user_name || '?').split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2);
+        var div = document.createElement('div');
+        div.className = 'forum-post';
+        div.innerHTML = '<div class="forum-post-header">' +
+            '<div class="forum-post-avatar">' + initials + '</div>' +
+            '<span class="forum-post-name">' + (post.user_name || 'Anonymous') + '</span>' +
+            '<span class="forum-post-time">' + timeAgo(post.created_at) + '</span>' +
+            '</div>' +
+            '<div class="forum-post-text">' + post.text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</div>';
+        return div;
+    }
+
+    function loadForumPosts() {
+        if (!forumPosts) return;
+        fetch('/api/forum/posts')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                forumPosts.innerHTML = '';
+                if (!data.posts || data.posts.length === 0) {
+                    forumPosts.innerHTML = '<div class="forum-empty">No posts yet. Be the first to share something!</div>';
+                    return;
+                }
+                data.posts.forEach(function(p) { forumPosts.appendChild(renderForumPost(p)); });
+            })
+            .catch(function() {
+                forumPosts.innerHTML = '<div class="forum-empty">Could not load posts.</div>';
+            });
+    }
+
+    loadForumPosts();
+
+    if (forumPostBtn) {
+        forumPostBtn.addEventListener('click', function() {
+            if (!authToken) { openAuthModal('login'); return; }
+            var text = forumInput.value.trim();
+            if (!text) return;
+            forumPostBtn.disabled = true;
+            fetch('/api/forum/posts', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ text: text })
+            })
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(res) {
+                forumPostBtn.disabled = false;
+                if (!res.ok) {
+                    if (res.data.error === 'Login required to post.') openAuthModal('login');
+                    return;
+                }
+                forumInput.value = '';
+                forumCharCount.textContent = '0 / 2000';
+                loadForumPosts();
+            })
+            .catch(function() { forumPostBtn.disabled = false; });
+        });
+    }
+
     // ─── Diff Checker ───
     var diffModal = document.getElementById('diff-modal');
     var openDiffBtn = document.getElementById('open-diff-btn');
