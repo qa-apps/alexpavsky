@@ -293,6 +293,116 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Challenge Playground (inline) -->
+            <div class="challenge-playground" id="challenge-playground" style="display:none">
+                <div class="challenge-playground-header">
+                    <h3><i class="fas fa-skull-crossbones"></i> Can You Break This AI?</h3>
+                    <p>Pick a category, craft your attack, and see if the judge model catches it.</p>
+                </div>
+                <div class="challenge-playground-grid">
+                    <div class="challenge-left">
+                        <div class="challenge-categories" id="challenge-categories">
+                            <button class="challenge-cat-btn active" data-cat="injection">
+                                <i class="fas fa-syringe"></i>
+                                <span>Prompt Injection</span>
+                                <small>Extract secrets from the bot</small>
+                            </button>
+                            <button class="challenge-cat-btn" data-cat="jailbreak">
+                                <i class="fas fa-lock-open"></i>
+                                <span>Jailbreak</span>
+                                <small>Bypass safety guardrails</small>
+                            </button>
+                            <button class="challenge-cat-btn" data-cat="hallucination">
+                                <i class="fas fa-ghost"></i>
+                                <span>Hallucination</span>
+                                <small>Make the bot invent facts</small>
+                            </button>
+                            <button class="challenge-cat-btn" data-cat="bias">
+                                <i class="fas fa-balance-scale"></i>
+                                <span>Bias Detection</span>
+                                <small>Expose hidden biases</small>
+                            </button>
+                        </div>
+                        <div class="challenge-system-prompt" id="challenge-system-prompt">
+                            <div class="system-prompt-label"><i class="fas fa-lock"></i> Target Bot System Prompt</div>
+                            <pre id="challenge-system-text"></pre>
+                        </div>
+                        <div class="challenge-stats" id="challenge-stats">
+                            <div class="challenge-stat">
+                                <span class="challenge-stat-value" id="cstat-attempts">0</span>
+                                <span class="challenge-stat-label">Attempts</span>
+                            </div>
+                            <div class="challenge-stat">
+                                <span class="challenge-stat-value" id="cstat-breaks">0</span>
+                                <span class="challenge-stat-label">Breaks</span>
+                            </div>
+                            <div class="challenge-stat">
+                                <span class="challenge-stat-value" id="cstat-rate">0%</span>
+                                <span class="challenge-stat-label">Success</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="challenge-right">
+                        <div class="challenge-input-area">
+                            <textarea id="challenge-input" class="code-input challenge-textarea" placeholder="Type your adversarial prompt here... Try to break the bot!"></textarea>
+                            <div class="challenge-actions">
+                                <button class="btn btn-danger btn-sm" id="challenge-submit-btn" disabled>
+                                    <i class="fas fa-paper-plane"></i> Send Attack
+                                </button>
+                                <span class="challenge-char-count" id="challenge-char-count">0 / 4000</span>
+                            </div>
+                        </div>
+                        <div class="challenge-results" id="challenge-results" style="display:none">
+                            <div class="challenge-result-section">
+                                <div class="result-label"><i class="fas fa-robot"></i> Bot Response</div>
+                                <div class="result-bot-response" id="challenge-bot-response"></div>
+                            </div>
+                            <div class="challenge-verdict-card" id="challenge-verdict-card">
+                                <div class="verdict-header" id="verdict-header">
+                                    <div class="verdict-icon" id="verdict-icon"></div>
+                                    <div class="verdict-title" id="verdict-title"></div>
+                                </div>
+                                <div class="verdict-metrics">
+                                    <div class="verdict-metric">
+                                        <span class="metric-label">Confidence</span>
+                                        <div class="metric-bar"><div class="metric-fill" id="verdict-confidence-bar"></div></div>
+                                        <span class="metric-value" id="verdict-confidence"></span>
+                                    </div>
+                                    <div class="verdict-metric">
+                                        <span class="metric-label">Severity</span>
+                                        <span class="verdict-severity-badge" id="verdict-severity"></span>
+                                    </div>
+                                </div>
+                                <div class="verdict-detail">
+                                    <div class="verdict-detail-label"><i class="fas fa-search"></i> Analysis</div>
+                                    <p id="verdict-analysis"></p>
+                                </div>
+                                <div class="verdict-detail">
+                                    <div class="verdict-detail-label"><i class="fas fa-crosshairs"></i> Attack Type</div>
+                                    <p id="verdict-attack-type"></p>
+                                </div>
+                                <div class="verdict-detail">
+                                    <div class="verdict-detail-label"><i class="fas fa-shield-halved"></i> Production Mitigation</div>
+                                    <p id="verdict-mitigation"></p>
+                                </div>
+                                <div class="verdict-models">
+                                    <span id="verdict-target-model"></span>
+                                    <span id="verdict-judge-model"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="challenge-loading" id="challenge-loading" style="display:none">
+                            <div class="challenge-loading-inner">
+                                <div class="spinner"></div>
+                                <p>Sending to target bot...</p>
+                                <p class="challenge-loading-sub" id="challenge-loading-text">Then analyzing with judge model...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </section>
 
@@ -336,115 +446,6 @@
         </div>
     </div>
 
-    <div class="challenge-modal" id="challenge-modal">
-        <div class="modal-overlay"></div>
-        <div class="modal-content modal-challenge">
-            <div class="modal-header challenge-header">
-                <h3><i class="fas fa-skull-crossbones"></i> Can You Break This AI?</h3>
-                <button class="modal-close" id="challenge-modal-close"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="modal-body challenge-body">
-                <div class="challenge-intro" id="challenge-intro">
-                    <p class="challenge-subtitle">Pick a category and try to break the AI. A judge model will analyze your attempt.</p>
-                    <div class="challenge-categories" id="challenge-categories">
-                        <button class="challenge-cat-btn active" data-cat="injection">
-                            <i class="fas fa-syringe"></i>
-                            <span>Prompt Injection</span>
-                            <small>Extract secrets from the bot</small>
-                        </button>
-                        <button class="challenge-cat-btn" data-cat="jailbreak">
-                            <i class="fas fa-lock-open"></i>
-                            <span>Jailbreak</span>
-                            <small>Bypass safety guardrails</small>
-                        </button>
-                        <button class="challenge-cat-btn" data-cat="hallucination">
-                            <i class="fas fa-ghost"></i>
-                            <span>Hallucination</span>
-                            <small>Make the bot invent facts</small>
-                        </button>
-                        <button class="challenge-cat-btn" data-cat="bias">
-                            <i class="fas fa-balance-scale"></i>
-                            <span>Bias Detection</span>
-                            <small>Expose hidden biases</small>
-                        </button>
-                    </div>
-                    <div class="challenge-system-prompt" id="challenge-system-prompt">
-                        <div class="system-prompt-label"><i class="fas fa-lock"></i> Target Bot System Prompt</div>
-                        <pre id="challenge-system-text"></pre>
-                    </div>
-                </div>
-                <div class="challenge-input-area">
-                    <textarea id="challenge-input" class="code-input challenge-textarea" placeholder="Type your adversarial prompt here... Try to break the bot!"></textarea>
-                    <div class="challenge-actions">
-                        <button class="btn btn-danger btn-sm" id="challenge-submit-btn" disabled>
-                            <i class="fas fa-paper-plane"></i> Send Attack
-                        </button>
-                        <span class="challenge-char-count" id="challenge-char-count">0 / 4000</span>
-                    </div>
-                </div>
-                <div class="challenge-results" id="challenge-results" style="display:none">
-                    <div class="challenge-result-section">
-                        <div class="result-label"><i class="fas fa-robot"></i> Bot Response</div>
-                        <div class="result-bot-response" id="challenge-bot-response"></div>
-                    </div>
-                    <div class="challenge-verdict-card" id="challenge-verdict-card">
-                        <div class="verdict-header" id="verdict-header">
-                            <div class="verdict-icon" id="verdict-icon"></div>
-                            <div class="verdict-title" id="verdict-title"></div>
-                        </div>
-                        <div class="verdict-metrics">
-                            <div class="verdict-metric">
-                                <span class="metric-label">Confidence</span>
-                                <div class="metric-bar"><div class="metric-fill" id="verdict-confidence-bar"></div></div>
-                                <span class="metric-value" id="verdict-confidence"></span>
-                            </div>
-                            <div class="verdict-metric">
-                                <span class="metric-label">Severity</span>
-                                <span class="verdict-severity-badge" id="verdict-severity"></span>
-                            </div>
-                        </div>
-                        <div class="verdict-detail">
-                            <div class="verdict-detail-label"><i class="fas fa-search"></i> Analysis</div>
-                            <p id="verdict-analysis"></p>
-                        </div>
-                        <div class="verdict-detail">
-                            <div class="verdict-detail-label"><i class="fas fa-crosshairs"></i> Attack Type</div>
-                            <p id="verdict-attack-type"></p>
-                        </div>
-                        <div class="verdict-detail">
-                            <div class="verdict-detail-label"><i class="fas fa-shield-halved"></i> Production Mitigation</div>
-                            <p id="verdict-mitigation"></p>
-                        </div>
-                        <div class="verdict-models">
-                            <span id="verdict-target-model"></span>
-                            <span id="verdict-judge-model"></span>
-                        </div>
-                    </div>
-                </div>
-                <div class="challenge-stats" id="challenge-stats">
-                    <div class="challenge-stat">
-                        <span class="challenge-stat-value" id="cstat-attempts">0</span>
-                        <span class="challenge-stat-label">Attempts</span>
-                    </div>
-                    <div class="challenge-stat">
-                        <span class="challenge-stat-value" id="cstat-breaks">0</span>
-                        <span class="challenge-stat-label">Breaks</span>
-                    </div>
-                    <div class="challenge-stat">
-                        <span class="challenge-stat-value" id="cstat-rate">0%</span>
-                        <span class="challenge-stat-label">Success</span>
-                    </div>
-                </div>
-                <div class="challenge-loading" id="challenge-loading" style="display:none">
-                    <div class="challenge-loading-inner">
-                        <div class="spinner"></div>
-                        <p>Sending to target bot...</p>
-                        <p class="challenge-loading-sub" id="challenge-loading-text">Then analyzing with judge model...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <section class="section" id="forum">
         <div class="container">
