@@ -7,24 +7,132 @@
         { name: 'AI Weirdness', url: 'https://www.aiweirdness.com/rss/', category: 'ai' },
         { name: 'Google AI Blog', url: 'https://blog.google/technology/ai/rss/', category: 'ai' },
         { name: 'OpenAI Blog', url: 'https://openai.com/blog/rss.xml', category: 'ai' },
-        { name: 'Ministry of Testing', url: 'https://www.ministryoftesting.com/feeds/blogs', category: 'qa' },
         { name: 'Software Testing Help', url: 'https://www.softwaretestinghelp.com/feed/', category: 'qa' },
-        { name: 'Sauce Labs', url: 'https://saucelabs.com/blog/rss.xml', category: 'qa' },
-        { name: 'Test Automation University', url: 'https://testautomationu.applitools.com/rss.xml', category: 'qa' },
-        { name: 'QA Lead', url: 'https://theqalead.com/feed/', category: 'qa' },
-        { name: 'LambdaTest Blog', url: 'https://www.lambdatest.com/blog/feed/', category: 'qa' },
+        { name: 'Cypress Blog', url: 'https://www.cypress.io/blog/rss.xml', category: 'qa' },
+        { name: 'Applitools Blog', url: 'https://applitools.com/blog/feed/', category: 'qa' },
+        { name: 'Testomat Blog', url: 'https://testomat.io/blog/feed/', category: 'qa' },
+        { name: 'MuukTest Blog', url: 'https://muuktest.com/blog/rss.xml', category: 'qa' },
+        { name: 'Mabl Blog', url: 'https://www.mabl.com/blog/rss.xml', category: 'qa' },
         { name: 'Martin Fowler', url: 'https://martinfowler.com/feed.atom', category: 'dev' },
-        { name: 'Dev.to', url: 'https://dev.to/feed', category: 'dev' },
         { name: 'CSS-Tricks', url: 'https://css-tricks.com/feed/', category: 'dev' },
         { name: 'Smashing Magazine', url: 'https://www.smashingmagazine.com/feed/', category: 'dev' },
         { name: 'The Pragmatic Engineer', url: 'https://blog.pragmaticengineer.com/rss/', category: 'dev' },
     ];
+    const YOUTUBE_SOURCES = [
+        { name: 'AI Explained', channelId: 'UCNJ1Ymd5yFuUPtn21xtRbbw' },
+        { name: 'Yannic Kilcher', channelId: 'UCZHmQk67mSJgfCCTn7xBfew' },
+        { name: 'Two Minute Papers', channelId: 'UCbfYPyITQ-7l4upoX8nvctg' },
+        { name: 'Fireship', channelId: 'UCsBjURrPoezykLs9EqgamOA' },
+        { name: 'Lex Fridman', channelId: 'UCSHZKyawb77ixDdsGog4iWA' },
+        { name: 'OpenAI', channelId: 'UCXZCJLdBC09xxP5Tja2vPzw' }
+    ];
+    const FEED_FALLBACK_ARTICLES = [
+        {
+            source: 'OpenAI Blog',
+            title: 'OpenAI acquires TBPN',
+            link: 'https://openai.com/index/openai-acquires-tbpn',
+            description: 'OpenAI expands its media and AI conversation strategy with the acquisition of TBPN.',
+            category: 'ai',
+            date: '2026-04-02T10:30:00Z'
+        },
+        {
+            source: 'Hugging Face',
+            title: 'Open models, agents, and evaluation workflows',
+            link: 'https://huggingface.co/blog',
+            description: 'Latest model and tooling updates from the Hugging Face ecosystem.',
+            category: 'ai',
+            date: '2026-04-01T12:00:00Z'
+        },
+        {
+            source: 'Software Testing Help',
+            title: 'Modern QA strategies for AI-infused products',
+            link: 'https://www.softwaretestinghelp.com/',
+            description: 'Practical QA guidance for systems with AI, automation, and changing output behavior.',
+            category: 'qa',
+            date: '2026-04-01T09:00:00Z'
+        },
+        {
+            source: 'Applitools Blog',
+            title: 'Visual testing patterns for fast UI teams',
+            link: 'https://applitools.com/blog/',
+            description: 'How teams keep visual regressions under control across browsers and product variants.',
+            category: 'qa',
+            date: '2026-03-30T15:00:00Z'
+        },
+        {
+            source: 'Martin Fowler',
+            title: 'Architecture tradeoffs in modern engineering',
+            link: 'https://martinfowler.com/',
+            description: 'Notes on balancing complexity, delivery speed, and system quality in production software.',
+            category: 'dev',
+            date: '2026-03-29T17:00:00Z'
+        },
+        {
+            source: 'The Pragmatic Engineer',
+            title: 'Engineering execution and high-leverage product work',
+            link: 'https://blog.pragmaticengineer.com/',
+            description: 'A practical view of engineering operations, product leverage, and delivery discipline.',
+            category: 'dev',
+            date: '2026-03-28T11:00:00Z'
+        }
+    ];
+    const YOUTUBE_FALLBACK_VIDEOS = [
+        {
+            source: 'OpenAI',
+            title: 'OpenAI channel',
+            link: 'https://www.youtube.com/watch?v=9H0LwTqJwWk',
+            date: '2026-04-01T12:00:00Z'
+        },
+        {
+            source: 'Two Minute Papers',
+            title: 'Two Minute Papers latest research roundup',
+            link: 'https://www.youtube.com/watch?v=fE3S2vM2vQ8',
+            date: '2026-03-30T12:00:00Z'
+        },
+        {
+            source: 'Fireship',
+            title: 'Fireship rapid tech briefing',
+            link: 'https://www.youtube.com/watch?v=cuHDQhDhvPE',
+            date: '2026-03-27T12:00:00Z'
+        },
+        {
+            source: 'Lex Fridman',
+            title: 'Lex Fridman AI conversation highlight',
+            link: 'https://www.youtube.com/watch?v=7xTGNNLPyMI',
+            date: '2026-03-24T12:00:00Z'
+        }
+    ];
 
-    const CORS_PROXY = 'https://api.rss2json.com/v1/api.json?rss_url=';
+    const FEED_MAX_AGE_DAYS = 30;
+    const FEED_CARDS_PER_VIEW = 6;
     let allArticles = [];
     let displayedCount = 0;
     const ARTICLES_PER_PAGE = 9;
     let currentFilter = 'all';
+
+    function timeoutPromise(ms) {
+        return new Promise(function (_, reject) {
+            setTimeout(function () { reject(new Error('timeout')); }, ms);
+        });
+    }
+
+    async function fetchTextWithTimeout(url, options, timeoutMs) {
+        var response = await Promise.race([
+            fetch(url, options || {}),
+            timeoutPromise(timeoutMs || 10000)
+        ]);
+        if (!response || !response.ok) throw new Error('request_failed');
+        return response.text();
+    }
+
+    async function fetchJsonWithTimeout(url, options, timeoutMs) {
+        var response = await Promise.race([
+            fetch(url, options || {}),
+            timeoutPromise(timeoutMs || 10000)
+        ]);
+        if (!response || !response.ok) throw new Error('request_failed');
+        return response.json();
+    }
 
     // ─── Theme Toggle ───
     var themeToggle = document.getElementById('theme-toggle');
@@ -79,59 +187,77 @@
         var tt = document.querySelector('.terminal-title');
         if (!tb) return;
         var scenes = [
-            { title: 'ai-radar.sh', lines: [
-                {p: true, html: '<span class="t-cmd">scanning</span> <span class="t-arg">--sources 7 --topics ai,qa,llm</span>'},
-                {html: '<span class="t-success">✓</span> Connected to RSS feeds...'},
-                {html: '<span class="t-info">↳</span> The Gradient — <span class="t-highlight">3 new</span>'},
-                {html: '<span class="t-info">↳</span> Hugging Face — <span class="t-highlight">5 new</span>'},
-                {html: '<span class="t-info">↳</span> AI Weirdness — <span class="t-highlight">1 new</span>'},
-                {html: '<span class="t-info">↳</span> Martin Fowler — <span class="t-highlight">2 new</span>'},
-                {html: '<span class="t-success">✓</span> Feed updated. <span class="t-dim">Next refresh in 30m</span>'},
+            { title: 'playwright.config.ts', lines: [
+                {p: true, html: '<span class="t-cmd">npx</span> <span class="t-arg">playwright test --headed --workers=4</span>'},
+                {html: '<span class="t-info">↳</span> Running <span class="t-highlight">36 tests</span> on 3 browsers...'},
+                {html: '<span class="t-success">✓</span> [chromium] login-flow.spec.ts <span class="t-dim">1.2s</span>'},
+                {html: '<span class="t-success">✓</span> [chromium] api-endpoints.spec.ts <span class="t-dim">0.8s</span>'},
+                {html: '<span class="t-success">✓</span> [chromium] chat-widget.spec.ts <span class="t-dim">2.1s</span>'},
+                {html: '<span class="t-success">✓</span> [firefox] login-flow.spec.ts <span class="t-dim">1.5s</span>'},
+                {html: '<span class="t-success">✓</span> [firefox] api-endpoints.spec.ts <span class="t-dim">0.9s</span>'},
+                {html: '<span class="t-success">✓</span> [webkit] visual-regression.spec.ts <span class="t-dim">3.2s</span>'},
+                {html: '<span class="t-success">✓</span> Screenshots: <span class="t-highlight">0 diffs</span> detected'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">36 passed</span> · 0 failed · 0 skipped <span class="t-dim">(18s)</span>'},
             ]},
-            { title: 'chat_server.py', lines: [
-                {p: true, html: '<span class="t-cmd">python3</span> <span class="t-arg">chat_server.py</span>'},
-                {html: '<span class="t-success">✓</span> Loaded 25 AI models'},
-                {html: '<span class="t-info">↳</span> gemini: <span class="t-highlight">OK</span>'},
-                {html: '<span class="t-info">↳</span> openrouter: <span class="t-highlight">OK</span>'},
-                {html: '<span class="t-info">↳</span> groq: <span class="t-highlight">OK</span>'},
-                {html: '<span class="t-success">✓</span> Smart router active on <span class="t-highlight">:8000</span>'},
-                {html: '<span class="t-dim">Waiting for requests...</span>'},
+            { title: 'promptfoo eval.yaml', lines: [
+                {p: true, html: '<span class="t-cmd">promptfoo</span> <span class="t-arg">eval --config redteam.yaml</span>'},
+                {html: '<span class="t-info">↳</span> Loading <span class="t-highlight">8 adversarial</span> test cases...'},
+                {html: '<span class="t-success">✓</span> prompt_injection_sql <span class="t-dim">— blocked</span>'},
+                {html: '<span class="t-success">✓</span> prompt_injection_system <span class="t-dim">— blocked</span>'},
+                {html: '<span class="t-success">✓</span> jailbreak_dan_mode <span class="t-dim">— blocked</span>'},
+                {html: '<span class="t-success">✓</span> pii_extraction_attempt <span class="t-dim">— blocked</span>'},
+                {html: '<span class="t-success">✓</span> hallucination_grounding <span class="t-dim">— grounded</span>'},
+                {html: '<span class="t-success">✓</span> bias_gender_check <span class="t-dim">— neutral</span>'},
+                {html: '<span class="t-success">✓</span> toxicity_filter <span class="t-dim">— clean</span>'},
+                {html: '<span class="t-success">✓</span> off_topic_guardrail <span class="t-dim">— enforced</span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">8/8 passed</span> · Safety score: <span class="t-highlight">100%</span>'},
             ]},
-            { title: 'test_runner.py', lines: [
-                {p: true, html: '<span class="t-cmd">pytest</span> <span class="t-arg">tests/ -v --parallel</span>'},
-                {html: '<span class="t-success">PASS</span> test_login_flow <span class="t-dim">0.8s</span>'},
-                {html: '<span class="t-success">PASS</span> test_api_response <span class="t-dim">0.3s</span>'},
-                {html: '<span class="t-success">PASS</span> test_model_routing <span class="t-dim">1.2s</span>'},
-                {html: '<span class="t-success">PASS</span> test_fallback_chain <span class="t-dim">0.9s</span>'},
-                {html: '<span class="t-success">PASS</span> test_prompt_injection <span class="t-dim">0.5s</span>'},
-                {html: '<span class="t-success">✓</span> <span class="t-highlight">5 passed</span> in <span class="t-dim">3.7s</span>'},
+            { title: 'deepeval_suite.py', lines: [
+                {p: true, html: '<span class="t-cmd">deepeval</span> <span class="t-arg">test run --verbose</span>'},
+                {html: '<span class="t-info">↳</span> Evaluating RAG pipeline...'},
+                {html: '<span class="t-success">✓</span> Faithfulness <span class="t-dim">score: <span class="t-highlight">0.96</span></span>'},
+                {html: '<span class="t-success">✓</span> Answer Relevancy <span class="t-dim">score: <span class="t-highlight">0.94</span></span>'},
+                {html: '<span class="t-success">✓</span> Contextual Recall <span class="t-dim">score: <span class="t-highlight">0.91</span></span>'},
+                {html: '<span class="t-success">✓</span> Hallucination <span class="t-dim">score: <span class="t-highlight">0.02</span> (low ✓)</span>'},
+                {html: '<span class="t-success">✓</span> Toxicity <span class="t-dim">score: <span class="t-highlight">0.00</span></span>'},
+                {html: '<span class="t-success">✓</span> Bias <span class="t-dim">score: <span class="t-highlight">0.01</span></span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">6/6 metrics passed</span> · All thresholds met'},
             ]},
-            { title: 'deploy.sh', lines: [
-                {p: true, html: '<span class="t-cmd">rsync</span> <span class="t-arg">--deploy alexpavsky.com</span>'},
-                {html: '<span class="t-info">↳</span> Building assets...'},
-                {html: '<span class="t-info">↳</span> Uploading <span class="t-highlight">4 files</span>'},
-                {html: '<span class="t-info">↳</span> Restarting chat backend...'},
-                {html: '<span class="t-success">✓</span> SSL certificate valid'},
-                {html: '<span class="t-success">✓</span> nginx proxy active'},
-                {html: '<span class="t-success">✓</span> Live at <span class="t-highlight">alexpavsky.com</span>'},
+            { title: 'security-audit.sh', lines: [
+                {p: true, html: '<span class="t-cmd">audit</span> <span class="t-arg">--full --owasp-llm-top10</span>'},
+                {html: '<span class="t-success">✓</span> LLM01 Prompt Injection <span class="t-dim">— mitigated</span>'},
+                {html: '<span class="t-success">✓</span> LLM02 Insecure Output <span class="t-dim">— sanitized</span>'},
+                {html: '<span class="t-success">✓</span> LLM03 Training Data Poison <span class="t-dim">— N/A</span>'},
+                {html: '<span class="t-success">✓</span> LLM04 Model DoS <span class="t-dim">— rate limited</span>'},
+                {html: '<span class="t-success">✓</span> LLM05 Supply Chain <span class="t-dim">— verified</span>'},
+                {html: '<span class="t-success">✓</span> LLM06 Sensitive Disclosure <span class="t-dim">— filtered</span>'},
+                {html: '<span class="t-success">✓</span> LLM07 Insecure Plugin <span class="t-dim">— sandboxed</span>'},
+                {html: '<span class="t-success">✓</span> XSS / CSRF / SQLi <span class="t-dim">— <span class="t-highlight">0 vulnerabilities</span></span>'},
+                {html: '<span class="t-success">✓</span> SSL/TLS <span class="t-dim">— A+ rating</span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">Security score: 98/100</span> · All clear'},
             ]},
             { title: 'ai_orchestrator.py', lines: [
-                {p: true, html: '<span class="t-cmd">route</span> <span class="t-arg">--message "Explain prompt injection"</span>'},
-                {html: '<span class="t-info">↳</span> Analyzing complexity... <span class="t-highlight">tier:M</span>'},
-                {html: '<span class="t-info">↳</span> Selected: <span class="t-highlight">Gemini 2.5 Flash</span>'},
-                {html: '<span class="t-info">↳</span> Tokens: <span class="t-dim">in:42 out:380</span>'},
-                {html: '<span class="t-success">✓</span> Response in <span class="t-highlight">1.2s</span>'},
-                {html: '<span class="t-dim">Fallback chain: OpenRouter → Groq</span>'},
-                {html: '<span class="t-success">✓</span> <span class="t-highlight">25 models</span> ready'},
+                {p: true, html: '<span class="t-cmd">route</span> <span class="t-arg">--benchmark --models 25</span>'},
+                {html: '<span class="t-success">✓</span> Gemini 2.5 Pro <span class="t-dim">— 1.1s avg · <span class="t-highlight">online</span></span>'},
+                {html: '<span class="t-success">✓</span> Gemini 2.5 Flash <span class="t-dim">— 0.6s avg · <span class="t-highlight">online</span></span>'},
+                {html: '<span class="t-success">✓</span> Llama 3.3 70B <span class="t-dim">— 0.9s avg · <span class="t-highlight">online</span></span>'},
+                {html: '<span class="t-success">✓</span> DeepSeek R1 <span class="t-dim">— 2.3s avg · <span class="t-highlight">online</span></span>'},
+                {html: '<span class="t-success">✓</span> Qwen 3 Coder <span class="t-dim">— 1.8s avg · <span class="t-highlight">online</span></span>'},
+                {html: '<span class="t-success">✓</span> Fallback chains <span class="t-dim">— all routes verified</span>'},
+                {html: '<span class="t-success">✓</span> Smart routing <span class="t-dim">— tier S/M/H active</span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">25/25 models ready</span> · Latency OK'},
             ]},
-            { title: 'playwright.config.ts', lines: [
-                {p: true, html: '<span class="t-cmd">npx</span> <span class="t-arg">playwright test --headed</span>'},
-                {html: '<span class="t-info">↳</span> Running 12 tests on 3 browsers...'},
-                {html: '<span class="t-success">✓</span> chromium: <span class="t-highlight">12/12</span>'},
-                {html: '<span class="t-success">✓</span> firefox: <span class="t-highlight">12/12</span>'},
-                {html: '<span class="t-success">✓</span> webkit: <span class="t-highlight">12/12</span>'},
-                {html: '<span class="t-success">✓</span> Screenshots captured'},
-                {html: '<span class="t-success">✓</span> <span class="t-highlight">36 passed</span> <span class="t-dim">(18s)</span>'},
+            { title: 'ci-pipeline.yml', lines: [
+                {p: true, html: '<span class="t-cmd">gh</span> <span class="t-arg">actions run ci.yml --branch main</span>'},
+                {html: '<span class="t-success">✓</span> Lint & format <span class="t-dim">— eslint + black</span>'},
+                {html: '<span class="t-success">✓</span> Unit tests <span class="t-dim">— <span class="t-highlight">47/47</span> passed</span>'},
+                {html: '<span class="t-success">✓</span> Integration tests <span class="t-dim">— <span class="t-highlight">12/12</span> passed</span>'},
+                {html: '<span class="t-success">✓</span> E2E Playwright <span class="t-dim">— <span class="t-highlight">36/36</span> passed</span>'},
+                {html: '<span class="t-success">✓</span> AI eval suite <span class="t-dim">— <span class="t-highlight">8/8</span> passed</span>'},
+                {html: '<span class="t-success">✓</span> Security scan <span class="t-dim">— 0 CVEs</span>'},
+                {html: '<span class="t-success">✓</span> Docker build <span class="t-dim">— image 142MB</span>'},
+                {html: '<span class="t-success">✓</span> Deploy preview <span class="t-dim">— <span class="t-highlight">https://preview.alexpavsky.com</span></span>'},
+                {html: '<span class="t-success">✓</span> <span class="t-highlight">Pipeline passed</span> · 8/8 jobs green'},
             ]},
         ];
         var idx = 0;
@@ -147,7 +273,7 @@
                     cursor.className = 'terminal-line';
                     cursor.innerHTML = '<span class="t-prompt">$</span> <span class="t-cursor">_</span>';
                     tb.appendChild(cursor);
-                    setTimeout(playScene, 3500);
+                    setTimeout(playScene, 2000);
                     return;
                 }
                 var line = scene.lines[i];
@@ -161,7 +287,7 @@
                     el.style.opacity = '1'; el.style.transform = 'translateY(0)';
                 });
                 i++;
-                setTimeout(addLine, line.p ? 600 : 400);
+                setTimeout(addLine, line.p ? 400 : 180);
             }
             addLine();
         }
@@ -185,20 +311,11 @@
     // ─── RSS Feed ───
     async function fetchFeed(source) {
         try {
-            var resp = await fetch(CORS_PROXY + encodeURIComponent(source.url));
+            var resp = await fetch('/api/feed?source=' + encodeURIComponent(source.url));
             if (!resp.ok) return [];
             var data = await resp.json();
-            if (data.status !== 'ok' || !data.items) return [];
-            return data.items.slice(0, 8).map(function (item) {
-                return {
-                    title: item.title || 'Untitled',
-                    link: item.link || '#',
-                    description: stripHtml(item.description || '').slice(0, 200),
-                    date: item.pubDate || '',
-                    source: source.name,
-                    category: source.category,
-                };
-            });
+            if (!data.articles) return [];
+            return data.articles;
         } catch (e) {
             return [];
         }
@@ -210,11 +327,135 @@
         return tmp.textContent || tmp.innerText || '';
     }
 
-    function timeAgo(dateStr) {
+    function parseXmlFeed(xmlText, source) {
+        try {
+            var doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+            var parserError = doc.querySelector('parsererror');
+            if (parserError) return [];
+            var nodes = Array.from(doc.querySelectorAll('item, entry'));
+            return nodes.slice(0, 8).map(function (node) {
+                var titleNode = node.querySelector('title');
+                var descNode = node.querySelector('description, summary, content');
+                var pubNode = node.querySelector('pubDate, published, updated');
+                var link = '';
+                var linkNode = node.querySelector('link');
+                if (linkNode) {
+                    link = linkNode.getAttribute('href') || linkNode.textContent || '';
+                }
+                return {
+                    source: source.name,
+                    title: stripHtml(titleNode ? titleNode.textContent || '' : '').trim(),
+                    description: stripHtml(descNode ? descNode.textContent || '' : '').trim().slice(0, 220),
+                    link: link.trim(),
+                    category: source.category,
+                    date: (pubNode ? pubNode.textContent || '' : '').trim()
+                };
+            }).filter(function (item) {
+                return item.title && item.link;
+            });
+        } catch (e) {
+            return [];
+        }
+    }
+
+    async function fetchFeedBrowserFallback(source) {
+        try {
+            var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(source.url);
+            var xml = await fetchTextWithTimeout(proxyUrl, {}, 12000);
+            return parseXmlFeed(xml, source);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    async function fetchAllFeedsBrowserFallback() {
+        var settled = await Promise.allSettled(RSS_SOURCES.map(fetchFeedBrowserFallback));
+        return settled.reduce(function (acc, result) {
+            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                return acc.concat(result.value);
+            }
+            return acc;
+        }, []);
+    }
+
+    async function fetchYoutubeBrowserFallback() {
+        var settled = await Promise.allSettled(YOUTUBE_SOURCES.map(async function (source) {
+            try {
+                var url = 'https://api.rss2json.com/v1/api.json?rss_url=' +
+                    encodeURIComponent('https://www.youtube.com/feeds/videos.xml?channel_id=' + source.channelId);
+                var data = await fetchJsonWithTimeout(url, {}, 12000);
+                if (!data || !Array.isArray(data.items)) return [];
+                return data.items.slice(0, 8).map(function (item) {
+                    return {
+                        source: source.name,
+                        title: item.title || '',
+                        link: item.link || '',
+                        date: item.pubDate || '',
+                        thumb: item.thumbnail || (item.enclosure && item.enclosure.thumbnail) || ''
+                    };
+                }).filter(function (item) {
+                    return item.title && item.link;
+                });
+            } catch (e) {
+                return [];
+            }
+        }));
+        return settled.reduce(function (acc, result) {
+            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                return acc.concat(result.value);
+            }
+            return acc;
+        }, []).sort(function (a, b) {
+            var dateA = parseFeedDate(a.date);
+            var dateB = parseFeedDate(b.date);
+            return (dateB ? dateB.getTime() : 0) - (dateA ? dateA.getTime() : 0);
+        });
+    }
+
+    async function fetchArticlePreviewFallback(url) {
+        try {
+            var rawUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+            var html = await fetchTextWithTimeout(rawUrl, {}, 12000);
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var scope = doc.querySelector('article, main, [role="main"], body');
+            var image = '';
+            var ogImage = doc.querySelector('meta[property="og:image"], meta[name="og:image"]');
+            if (ogImage) image = ogImage.getAttribute('content') || '';
+
+            if (scope) {
+                scope.querySelectorAll('script, style, nav, footer, header, aside, iframe, noscript, svg').forEach(function (node) {
+                    node.remove();
+                });
+            }
+
+            var content = stripHtml(scope ? scope.innerHTML : html).replace(/\s+/g, ' ').trim();
+            if (content.length > 5000) content = content.slice(0, 5000) + '...';
+            return { content: content, image: image };
+        } catch (e) {
+            return { content: '', image: '' };
+        }
+    }
+
+    function normalizeFeedDate(item) {
+        if (!item) return '';
+        return item.pubDate || item.isoDate || item.date || item.published || item.publishedAt || item.updated || '';
+    }
+
+    function parseFeedDate(dateValue) {
+        if (!dateValue) return null;
+        var date = new Date(dateValue);
+        if (!isFinite(date.getTime())) return null;
+        return date;
+    }
+
+    function formatFeedTimeAgo(dateStr) {
         if (!dateStr) return '';
-        var date = new Date(dateStr);
+        var date = parseFeedDate(dateStr);
+        if (!date) return '';
         var now = new Date();
         var diff = Math.floor((now - date) / 1000);
+        if (!isFinite(diff)) return '';
+        if (diff < 0) diff = 0;
         if (diff < 60) return 'just now';
         if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
         if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
@@ -229,21 +470,126 @@
         return cat;
     }
 
+    function isRecentFeedArticle(article) {
+        var date = parseFeedDate(article && article.date);
+        if (!date) return false;
+        return (Date.now() - date.getTime()) <= FEED_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    }
+
+    function getFeedWeekKey() {
+        var now = new Date();
+        var start = new Date(now.getFullYear(), 0, 1);
+        var day = Math.floor((now - start) / 86400000);
+        var week = Math.floor((day + start.getDay()) / 7);
+        return now.getFullYear() + '-w' + week;
+    }
+
+    function hashFeedKey(value) {
+        var hash = 0;
+        for (var i = 0; i < value.length; i++) {
+            hash = ((hash << 5) - hash) + value.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash);
+    }
+
+    function sortFeedByDate(articles) {
+        return articles.slice().sort(function (a, b) {
+            var dateA = parseFeedDate(a.date);
+            var dateB = parseFeedDate(b.date);
+            var timeA = dateA ? dateA.getTime() : 0;
+            var timeB = dateB ? dateB.getTime() : 0;
+            return timeB - timeA;
+        });
+    }
+
+    function rankFeedPool(articles, scopeKey) {
+        var weekKey = getFeedWeekKey();
+        return articles.slice().sort(function (a, b) {
+            var dateA = parseFeedDate(a.date);
+            var dateB = parseFeedDate(b.date);
+            var timeA = dateA ? dateA.getTime() : 0;
+            var timeB = dateB ? dateB.getTime() : 0;
+            var diff = timeB - timeA;
+            if (Math.abs(diff) > 4 * 24 * 60 * 60 * 1000) return diff;
+
+            var keyA = weekKey + '|' + scopeKey + '|' + (a.link || a.title || '');
+            var keyB = weekKey + '|' + scopeKey + '|' + (b.link || b.title || '');
+            return hashFeedKey(keyA) - hashFeedKey(keyB);
+        });
+    }
+
+    function pickFeedCards(articles, max, scopeKey) {
+        var recent = sortFeedByDate(articles.filter(isRecentFeedArticle));
+        var pool = rankFeedPool(recent.slice(0, Math.max(max * 4, 18)), scopeKey);
+        var result = [];
+        var seenLinks = {};
+        var seenSources = {};
+
+        pool.forEach(function (article) {
+            var link = article.link || article.title;
+            var source = article.source || '';
+            if (result.length >= max) return;
+            if (seenLinks[link] || seenSources[source]) return;
+            seenLinks[link] = true;
+            seenSources[source] = true;
+            result.push(article);
+        });
+
+        recent.forEach(function (article) {
+            var link = article.link || article.title;
+            if (result.length >= max) return;
+            if (seenLinks[link]) return;
+            seenLinks[link] = true;
+            result.push(article);
+        });
+
+        return result.slice(0, max);
+    }
+
+    function pickAllFeedCards(articles) {
+        var recent = articles.filter(isRecentFeedArticle);
+        var selected = [];
+        var seenLinks = {};
+        ['ai', 'qa', 'dev'].forEach(function (category) {
+            pickFeedCards(recent.filter(function (article) { return article.category === category; }), 2, 'all:' + category)
+                .forEach(function (article) {
+                    var link = article.link || article.title;
+                    if (seenLinks[link]) return;
+                    seenLinks[link] = true;
+                    selected.push(article);
+                });
+        });
+
+        if (selected.length < FEED_CARDS_PER_VIEW) {
+            pickFeedCards(recent, FEED_CARDS_PER_VIEW * 2, 'all:fill').forEach(function (article) {
+                var link = article.link || article.title;
+                if (selected.length >= FEED_CARDS_PER_VIEW || seenLinks[link]) return;
+                seenLinks[link] = true;
+                selected.push(article);
+            });
+        }
+
+        return selected.slice(0, FEED_CARDS_PER_VIEW);
+    }
+
     function renderArticle(article) {
         var card = document.createElement('a');
         card.className = 'feed-card';
         card.href = article.link;
-        card.target = '_blank';
-        card.rel = 'noopener';
         card.setAttribute('data-category', article.category);
         card.innerHTML =
             '<div class="feed-card-source">' +
                 '<span class="feed-source-name">' + escapeHtml(article.source) + '</span>' +
-                '<span class="feed-card-date">' + timeAgo(article.date) + '</span>' +
+                '<span class="feed-card-date">' + formatFeedTimeAgo(article.date) + '</span>' +
             '</div>' +
             '<h3>' + escapeHtml(article.title) + '</h3>' +
             '<p>' + escapeHtml(article.description) + '</p>' +
             '<span class="feed-card-tag">' + getCategoryLabel(article.category) + '</span>';
+        card.addEventListener('click', function (e) {
+            e.preventDefault();
+            openArticleModal(article.link, article.source, article.title, article.description, article.category, article.date);
+        });
         return card;
     }
 
@@ -270,11 +616,10 @@
         var grid = document.getElementById('feed-grid');
         if (!grid) return;
 
-        var filtered = currentFilter === 'all'
-            ? allArticles
-            : allArticles.filter(function (a) { return a.category === currentFilter; });
-
-        var toShow = pickUniqueBySource(filtered, 6);
+        var recent = allArticles.filter(isRecentFeedArticle);
+        var toShow = currentFilter === 'all'
+            ? pickAllFeedCards(recent)
+            : pickFeedCards(recent.filter(function (a) { return a.category === currentFilter; }), FEED_CARDS_PER_VIEW, currentFilter);
         grid.innerHTML = '';
 
         if (toShow.length === 0) {
@@ -287,17 +632,62 @@
         });
     }
 
-    async function loadAllFeeds() {
-        var promises = RSS_SOURCES.map(fetchFeed);
-        var results = await Promise.allSettled(promises);
-        var articles = [];
-        results.forEach(function (r) {
-            if (r.status === 'fulfilled') articles = articles.concat(r.value);
-        });
+    var FEED_STORAGE_KEY = 'alexpavsky_feed_cache';
 
-        articles.sort(function (a, b) {
-            return new Date(b.date) - new Date(a.date);
-        });
+    function saveFeedToStorage(articles) {
+        try {
+            localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify({ ts: Date.now(), articles: articles.slice(0, 30) }));
+        } catch (e) {}
+    }
+
+    function loadFeedFromStorage() {
+        try {
+            var data = JSON.parse(localStorage.getItem(FEED_STORAGE_KEY));
+            if (data && data.articles && Date.now() - data.ts < 3600000) return data.articles;
+        } catch (e) {}
+        return [];
+    }
+
+    async function loadAllFeeds() {
+        // Show cached articles instantly while fetching fresh ones
+        var cached = loadFeedFromStorage();
+        if (cached.length > 0 && allArticles.length === 0) {
+            allArticles = cached;
+            displayedCount = 0;
+            displayArticles();
+            updateTicker(cached);
+            updateStats(cached);
+        }
+        if (cached.length === 0 && allArticles.length === 0) {
+            allArticles = FEED_FALLBACK_ARTICLES.slice();
+            displayedCount = 0;
+            displayArticles();
+            updateTicker(allArticles);
+            updateStats(allArticles);
+        }
+        var articles = [];
+        try {
+            var response = await fetch('/api/feed');
+            if (!response.ok) throw new Error('feed_request_failed');
+            var data = await response.json();
+            articles = Array.isArray(data.articles) ? data.articles : [];
+        } catch (err) {
+            articles = [];
+        }
+
+        if (articles.length === 0) {
+            articles = await fetchAllFeedsBrowserFallback();
+        }
+
+        if (articles.length === 0) {
+            articles = FEED_FALLBACK_ARTICLES.slice();
+        }
+
+        articles = sortFeedByDate(articles).filter(isRecentFeedArticle);
+
+        if (articles.length > 0) {
+            saveFeedToStorage(articles);
+        }
 
         allArticles = articles;
         displayedCount = 0;
@@ -346,20 +736,261 @@
         var headlines = articles.slice(0, 20);
         var html = '';
         headlines.forEach(function (a) {
-            html += '<a class="ticker-item" href="' + escapeHtml(a.link) + '" target="_blank" rel="noopener">' +
+            html += '<a class="ticker-item" href="' + escapeHtml(a.link) + '" data-source="' + escapeHtml(a.source) + '" data-title="' + escapeHtml(a.title) + '" data-desc="' + escapeHtml(a.description || '') + '" data-cat="' + escapeHtml(a.category || '') + '" data-date="' + escapeHtml(a.date || '') + '" rel="noopener">' +
                     '<i class="fas fa-circle-dot"></i> ' +
                     '<strong>' + escapeHtml(a.source) + ':</strong> ' +
                     escapeHtml(a.title) + '</a>';
         });
         ticker.innerHTML = html + html;
+        // Open articles in modal instead of navigating away
+        ticker.querySelectorAll('.ticker-item').forEach(function (item) {
+            item.addEventListener('click', function (e) {
+                e.preventDefault();
+                openArticleModal(item.href, item.getAttribute('data-source') || '', item.getAttribute('data-title') || '', item.getAttribute('data-desc') || '', item.getAttribute('data-cat') || '', item.getAttribute('data-date') || '');
+            });
+        });
     }
+
+    // ─── Article Modal (loads content via proxy) ───
+    function openArticleModal(url, source, title, desc, category, date) {
+        var overlay = document.getElementById('article-modal-overlay');
+        if (!overlay) return;
+        var sourceEl = document.getElementById('article-modal-source');
+        var titleEl = document.getElementById('article-modal-title');
+        var descEl = document.getElementById('article-modal-desc');
+        var metaEl = document.getElementById('article-modal-meta');
+        var linkEl = document.getElementById('article-modal-link');
+        var copyBtn = document.getElementById('article-modal-copy');
+        if (sourceEl) sourceEl.textContent = source;
+        if (titleEl) titleEl.textContent = title || 'Untitled';
+        var heroEl = document.getElementById('article-modal-hero');
+        if (descEl) {
+            descEl.textContent = desc || 'Loading article preview...';
+            descEl.classList.add('article-loading');
+            if (heroEl) heroEl.style.backgroundImage = '';
+            // Fetch full article content via proxy
+            fetch('/api/article-proxy?url=' + encodeURIComponent(url))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    descEl.classList.remove('article-loading');
+                    if (data.content) {
+                        var text = data.content.substring(0, 3000);
+                        if (data.content.length > 3000) text += '...';
+                        descEl.textContent = text;
+                    } else if (data.error) {
+                        descEl.textContent = desc || 'Could not load article preview.';
+                    }
+                    // Set hero background image
+                    if (data.image && heroEl) {
+                        heroEl.style.backgroundImage = 'url(' + data.image + ')';
+                    }
+                })
+                .catch(function () {
+                    return fetchArticlePreviewFallback(url).then(function (data) {
+                        descEl.classList.remove('article-loading');
+                        if (data.content) {
+                            var text = data.content.substring(0, 3000);
+                            if (data.content.length > 3000) text += '...';
+                            descEl.textContent = text;
+                        } else {
+                            descEl.textContent = desc || 'Preview unavailable on this source. Use "Read full article" to open the original page.';
+                        }
+                        if (data.image && heroEl) {
+                            heroEl.style.backgroundImage = 'url(' + data.image + ')';
+                        }
+                    });
+                })
+                .catch(function () {
+                    descEl.classList.remove('article-loading');
+                    descEl.textContent = desc || 'Preview unavailable on this source. Use "Read full article" to open the original page.';
+                });
+        }
+        if (metaEl) {
+            var parts = [];
+            if (category) parts.push('<span class="article-modal-cat">' + getCategoryLabel(category) + '</span>');
+            if (date) parts.push('<span class="article-modal-date"><i class="far fa-clock"></i> ' + formatFeedTimeAgo(date) + '</span>');
+            metaEl.innerHTML = parts.join('');
+        }
+        if (linkEl) linkEl.href = url;
+        if (copyBtn) {
+            copyBtn.onclick = function () {
+                navigator.clipboard.writeText(url).then(function () {
+                    copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                    setTimeout(function () { copyBtn.innerHTML = '<i class="fas fa-link"></i> Copy link'; }, 2000);
+                });
+            };
+        }
+        overlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+    function closeArticleModal() {
+        var overlay = document.getElementById('article-modal-overlay');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+    (function initArticleModal() {
+        var overlay = document.getElementById('article-modal-overlay');
+        var closeBtn = document.getElementById('article-modal-close');
+        if (overlay) overlay.addEventListener('click', function (e) { if (e.target === overlay) closeArticleModal(); });
+        if (closeBtn) closeBtn.addEventListener('click', closeArticleModal);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { closeArticleModal(); closeYtModal(); }
+        });
+    })();
+
+    // ─── YouTube Video Carousel ───
+    function renderYoutubeCarousel(videos) {
+        var container = document.getElementById('yt-carousel-content');
+        if (!container) { console.warn('[YT Carousel] Container not found'); return; }
+        if (!videos || videos.length === 0) {
+            container.innerHTML = '<div style="padding:2rem;color:var(--text-dim)">No recent videos found</div>';
+            return;
+        }
+        var cards = videos.slice(0, 20);
+        var html = '';
+        function makeCard(v) {
+            var vid = (v.link || '').match(/[?&]v=([A-Za-z0-9_\-]+)/);
+            var videoId = vid ? vid[1] : '';
+            var thumb = v.thumb || (videoId ? 'https://i.ytimg.com/vi/' + videoId + '/mqdefault.jpg' : '');
+            return '<a class="yt-card" href="' + escapeHtml(v.link) + '" target="_blank" rel="noopener" data-video-id="' + escapeHtml(videoId) + '">' +
+                '<div class="yt-card-thumb">' +
+                    '<img src="' + escapeHtml(thumb) + '" alt="" loading="lazy">' +
+                    '<div class="yt-card-play"><i class="fas fa-play"></i></div>' +
+                '</div>' +
+                '<div class="yt-card-info">' +
+                    '<span class="yt-card-channel">' + escapeHtml(v.source) + '</span>' +
+                    '<span class="yt-card-title">' + escapeHtml(v.title) + '</span>' +
+                '</div>' +
+            '</a>';
+        }
+        cards.forEach(function (v) { html += makeCard(v); });
+        container.innerHTML = html + html;
+
+        container.querySelectorAll('.yt-card').forEach(function (card) {
+            var videoId = card.getAttribute('data-video-id');
+            if (!videoId) return;
+            var hoverTimer = null;
+            card.addEventListener('mouseenter', function () {
+                hoverTimer = setTimeout(function () {
+                    var thumbDiv = card.querySelector('.yt-card-thumb');
+                    if (thumbDiv.querySelector('iframe')) return;
+                    var iframe = document.createElement('iframe');
+                    iframe.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&showinfo=0&start=5';
+                    iframe.allow = 'autoplay; encrypted-media';
+                    iframe.setAttribute('loading', 'lazy');
+                    thumbDiv.appendChild(iframe);
+                }, 600);
+            });
+            card.addEventListener('mouseleave', function () {
+                clearTimeout(hoverTimer);
+                var iframe = card.querySelector('iframe');
+                if (iframe) iframe.remove();
+            });
+            card.addEventListener('click', function (e) {
+                e.preventDefault();
+                var channel = card.querySelector('.yt-card-channel');
+                var title = card.querySelector('.yt-card-title');
+                openYtModal(videoId, channel ? channel.textContent : '', title ? title.textContent : '');
+            });
+        });
+    }
+
+    async function fetchYoutubeCarousel() {
+        try {
+            console.log('[YT Carousel] Fetching...');
+            renderYoutubeCarousel(YOUTUBE_FALLBACK_VIDEOS);
+            var videos = [];
+            try {
+                var res = await fetch('/api/youtube');
+                var data = await res.json();
+                videos = (data.videos || []);
+            } catch (apiErr) {
+                videos = [];
+            }
+            if (videos.length === 0) {
+                videos = await fetchYoutubeBrowserFallback();
+            }
+            if (videos.length === 0) {
+                videos = YOUTUBE_FALLBACK_VIDEOS.slice();
+            }
+            console.log('[YT Carousel] Got', videos.length, 'videos');
+            renderYoutubeCarousel(videos);
+            console.log('[YT Carousel] Rendered', videos.slice(0, 20).length, 'cards');
+        } catch (e) {
+            console.error('[YT Carousel] Error:', e);
+        }
+    }
+
+    // ─── YouTube Modal ───
+    function openYtModal(videoId, channel, title) {
+        var overlay = document.getElementById('yt-modal-overlay');
+        var player = document.getElementById('yt-modal-player');
+        var channelEl = document.getElementById('yt-modal-channel');
+        var titleEl = document.getElementById('yt-modal-title');
+        if (!overlay || !player) return;
+        player.innerHTML = '<iframe src="https://www.youtube.com/embed/' + videoId +
+            '?autoplay=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>';
+        if (channelEl) channelEl.textContent = channel;
+        if (titleEl) titleEl.textContent = title;
+        overlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+    function closeYtModal() {
+        var overlay = document.getElementById('yt-modal-overlay');
+        var player = document.getElementById('yt-modal-player');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        document.body.style.overflow = '';
+        setTimeout(function () { if (player) player.innerHTML = ''; }, 350);
+    }
+    (function initYtModal() {
+        var overlay = document.getElementById('yt-modal-overlay');
+        var closeBtn = document.getElementById('yt-modal-close');
+        if (overlay) overlay.addEventListener('click', function (e) { if (e.target === overlay) closeYtModal(); });
+        if (closeBtn) closeBtn.addEventListener('click', closeYtModal);
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeYtModal(); });
+    })();
+
+    // YouTube carousel arrow navigation
+    (function initYtArrows() {
+        var track = document.getElementById('yt-carousel-content');
+        var leftBtn = document.getElementById('yt-arrow-left');
+        var rightBtn = document.getElementById('yt-arrow-right');
+        if (!track || !leftBtn || !rightBtn) return;
+        function scrollBy(dir) {
+            track.style.animationPlayState = 'paused';
+            var current = track.getBoundingClientRect().left;
+            var parent = track.parentElement.getBoundingClientRect().left;
+            var offset = current - parent;
+            track.style.animation = 'none';
+            track.style.transform = 'translateX(' + offset + 'px)';
+            void track.offsetWidth;
+            var jump = dir * 300;
+            var next = offset + jump;
+            var half = track.scrollWidth / 2;
+            if (Math.abs(next) > half) next = 0;
+            if (next > 0) next = 0;
+            track.style.transition = 'transform 0.4s ease';
+            track.style.transform = 'translateX(' + next + 'px)';
+            setTimeout(function () {
+                track.style.transition = '';
+                track.style.animation = '';
+                track.style.animationPlayState = '';
+                track.style.transform = '';
+            }, 3000); // resume auto-scroll after 3s
+        }
+        leftBtn.addEventListener('click', function () { scrollBy(1); });
+        rightBtn.addEventListener('click', function () { scrollBy(-1); });
+    })();
 
     function updateStats(articles) {
         var el = document.getElementById('stat-articles');
         if (el) {
             var today = new Date().toDateString();
             var todayCount = articles.filter(function (a) {
-                return a.date && new Date(a.date).toDateString() === today;
+                var date = parseFeedDate(a.date);
+                return date && date.toDateString() === today;
             }).length;
             animateNumber(el, todayCount || articles.length);
         }
@@ -558,7 +1189,6 @@
                 setLoggedIn(res.data.user, res.data.token);
                 closeAuthModal();
                 loginForm.reset();
-                loadForumPosts();
             })
             .catch(function() { btn.disabled = false; loginError.textContent = 'Network error.'; });
         });
@@ -587,7 +1217,6 @@
                 setLoggedIn(res.data.user, res.data.token);
                 closeAuthModal();
                 registerForm.reset();
-                loadForumPosts();
             })
             .catch(function() { btn.disabled = false; registerError.textContent = 'Network error.'; });
         });
@@ -607,84 +1236,6 @@
             e.preventDefault();
             fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {});
             setLoggedOut();
-        });
-    }
-
-    // ─── Forum ───
-    var forumPosts = document.getElementById('forum-posts');
-    var forumInput = document.getElementById('forum-input');
-    var forumPostBtn = document.getElementById('forum-post-btn');
-    var forumCharCount = document.getElementById('forum-char-count');
-
-    if (forumInput && forumCharCount) {
-        forumInput.addEventListener('input', function() {
-            forumCharCount.textContent = forumInput.value.length + ' / 2000';
-        });
-    }
-
-    function timeAgo(ts) {
-        var diff = Math.floor(Date.now() / 1000 - ts);
-        if (diff < 60) return 'just now';
-        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-        return Math.floor(diff / 86400) + 'd ago';
-    }
-
-    function renderForumPost(post) {
-        var initials = (post.user_name || '?').split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2);
-        var div = document.createElement('div');
-        div.className = 'forum-post';
-        div.innerHTML = '<div class="forum-post-header">' +
-            '<div class="forum-post-avatar">' + initials + '</div>' +
-            '<span class="forum-post-name">' + (post.user_name || 'Anonymous') + '</span>' +
-            '<span class="forum-post-time">' + timeAgo(post.created_at) + '</span>' +
-            '</div>' +
-            '<div class="forum-post-text">' + post.text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</div>';
-        return div;
-    }
-
-    function loadForumPosts() {
-        if (!forumPosts) return;
-        fetch('/api/forum/posts')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                forumPosts.innerHTML = '';
-                if (!data.posts || data.posts.length === 0) {
-                    forumPosts.innerHTML = '<div class="forum-empty">No posts yet. Be the first to share something!</div>';
-                    return;
-                }
-                data.posts.forEach(function(p) { forumPosts.appendChild(renderForumPost(p)); });
-            })
-            .catch(function() {
-                forumPosts.innerHTML = '<div class="forum-empty">Could not load posts.</div>';
-            });
-    }
-
-    loadForumPosts();
-
-    if (forumPostBtn) {
-        forumPostBtn.addEventListener('click', function() {
-            if (!authToken) { openAuthModal('login'); return; }
-            var text = forumInput.value.trim();
-            if (!text) return;
-            forumPostBtn.disabled = true;
-            fetch('/api/forum/posts', {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({ text: text })
-            })
-            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-            .then(function(res) {
-                forumPostBtn.disabled = false;
-                if (!res.ok) {
-                    if (res.data.error === 'Login required to post.') openAuthModal('login');
-                    return;
-                }
-                forumInput.value = '';
-                forumCharCount.textContent = '0 / 2000';
-                loadForumPosts();
-            })
-            .catch(function() { forumPostBtn.disabled = false; });
         });
     }
 
@@ -822,7 +1373,18 @@
         ];
         var voiceLangIndex = 0;
 
+        // Chat teaser + notification dot
+        var chatTeaser = document.getElementById('chat-teaser');
+        var chatTeaserClose = document.getElementById('chat-teaser-close');
+        var chatNotifDot = chatToggle.querySelector('.chat-notification-dot');
+        function dismissTeaser() {
+            if (chatTeaser) chatTeaser.classList.add('hidden');
+            if (chatNotifDot) chatNotifDot.style.display = 'none';
+        }
+        if (chatTeaserClose) chatTeaserClose.addEventListener('click', function (e) { e.stopPropagation(); dismissTeaser(); });
+
         function openChat(focusInput) {
+            dismissTeaser();
             if (isOpen) { if (focusInput) chatInput.focus(); return; }
             isOpen = true;
             chatWindow.classList.add('active');
@@ -1279,11 +1841,20 @@
         }
 
         // Show inline playground and scroll to it
-        openChallengeBtn.addEventListener('click', function () {
+        function openChallengePlayground() {
             challengePlayground.style.display = 'block';
             updateSystemPrompt();
             updateStatsUI();
             challengePlayground.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        openChallengeBtn.addEventListener('click', openChallengePlayground);
+
+        // "Break it" nav button also opens the playground
+        document.querySelectorAll('.nav-link-break, .mobile-link-break').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                openChallengePlayground();
+            });
         });
 
         // Category selection
@@ -1415,11 +1986,214 @@
 
     // ─── Init ───
     loadAllFeeds();
+    fetchYoutubeCarousel();
 
     setInterval(loadAllFeeds, 30 * 60 * 1000);
+    setInterval(fetchYoutubeCarousel, 5 * 24 * 60 * 60 * 1000); // refresh YouTube carousel every 5 days
 
     // Observe new challenge card for animations
     document.querySelectorAll('.challenge-card').forEach(function (el) {
         animObserver.observe(el);
     });
+
+    // ─── AI vs Human Game ───
+    var aivshuSnippets = [
+        {
+            code: "function debounce(fn, ms) {\n  let t;\n  return function(...args) {\n    clearTimeout(t);\n    t = setTimeout(() => fn.apply(this, args), ms);\n  };\n  // TODO: add cancel method later\n}",
+            answer: "human",
+            hint: "The TODO comment and informal style are typical of human code."
+        },
+        {
+            code: "/**\n * Calculates the factorial of a non-negative integer.\n * @param {number} n - The input number.\n * @returns {number} The factorial of n.\n * @throws {RangeError} If n is negative.\n */\nfunction factorial(n) {\n  if (n < 0) throw new RangeError('Input must be non-negative');\n  if (n <= 1) return 1;\n  return n * factorial(n - 1);\n}",
+            answer: "ai",
+            hint: "Perfect JSDoc, thorough error handling, and textbook recursion are AI hallmarks."
+        },
+        {
+            code: "// quick fix for prod - mike said this works\nconst retry = (fn, n) => fn().catch(e =>\n  n > 0 ? retry(fn, n - 1) : Promise.reject(e)\n);\n// TODO: add backoff",
+            answer: "human",
+            hint: "Comments referencing a teammate and a TODO note scream human authorship."
+        },
+        {
+            code: "interface ValidationResult<T> {\n  success: boolean;\n  data?: T;\n  errors: ReadonlyArray<{\n    field: string;\n    message: string;\n    code: string;\n  }>;\n}\n\nfunction validate<T>(schema: Schema<T>, input: unknown): ValidationResult<T> {\n  const errors: ValidationResult<T>['errors'] = [];\n  // ... validation logic\n  return { success: errors.length === 0, data: input as T, errors };\n}",
+            answer: "ai",
+            hint: "Generics, ReadonlyArray, and clean TypeScript patterns - AI loves type safety."
+        },
+        {
+            code: "// HACK: Safari doesn't fire resize on orientation change\nlet lastW = window.innerWidth;\nsetInterval(() => {\n  if (window.innerWidth !== lastW) {\n    lastW = window.innerWidth;\n    handleResize(); // defined somewhere above lol\n  }\n}, 200);",
+            answer: "human",
+            hint: "Browser hacks, 'lol' comment, and setInterval polling = classic human workaround."
+        },
+        {
+            code: "async function fetchWithRetry(\n  url: string,\n  options: RequestInit = {},\n  maxRetries: number = 3,\n  baseDelay: number = 1000\n): Promise<Response> {\n  for (let attempt = 0; attempt <= maxRetries; attempt++) {\n    try {\n      const response = await fetch(url, options);\n      if (response.ok) return response;\n      if (response.status < 500) throw new Error(`Client error: ${response.status}`);\n    } catch (error) {\n      if (attempt === maxRetries) throw error;\n    }\n    await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt)));\n  }\n  throw new Error('Max retries exceeded');\n}",
+            answer: "ai",
+            hint: "Exponential backoff, typed params, exhaustive error handling - textbook AI pattern."
+        },
+        {
+            code: "const el = document.getElementById('app');\nel.innerHTML = data.map(x =>\n  `<div class=\"item ${x.active ? 'on' : ''}\">\n    <b>${x.name}</b> - $${x.price.toFixed(2)}\n  </div>`\n).join('');\n// ugh template literals are ugly for this",
+            answer: "human",
+            hint: "Opinionated comment and raw DOM manipulation are human coding habits."
+        },
+        {
+            code: "class EventEmitter {\n  private listeners: Map<string, Set<Function>> = new Map();\n\n  on(event: string, callback: Function): void {\n    if (!this.listeners.has(event)) {\n      this.listeners.set(event, new Set());\n    }\n    this.listeners.get(event)!.add(callback);\n  }\n\n  emit(event: string, ...args: unknown[]): void {\n    this.listeners.get(event)?.forEach(cb => cb(...args));\n  }\n\n  off(event: string, callback: Function): void {\n    this.listeners.get(event)?.delete(callback);\n  }\n}",
+            answer: "ai",
+            hint: "Clean class structure with Map/Set, proper TypeScript, and no shortcuts - AI generated."
+        },
+        {
+            code: "# dont ask why this works\ndef fix_encoding(s):\n    try:\n        return s.encode('latin-1').decode('utf-8')\n    except:\n        return s  # ¯\\_(ツ)_/¯",
+            answer: "human",
+            hint: "Shrug emoji, bare except, and 'dont ask why' - only a human writes this."
+        },
+        {
+            code: "def merge_sort(arr: list[int]) -> list[int]:\n    \"\"\"Sort a list of integers using the merge sort algorithm.\n    \n    Args:\n        arr: The list of integers to sort.\n    \n    Returns:\n        A new sorted list.\n    \n    Time complexity: O(n log n)\n    Space complexity: O(n)\n    \"\"\"\n    if len(arr) <= 1:\n        return arr\n    mid = len(arr) // 2\n    left = merge_sort(arr[:mid])\n    right = merge_sort(arr[mid:])\n    return _merge(left, right)",
+            answer: "ai",
+            hint: "Detailed docstring with complexity analysis and type hints - classic AI output."
+        },
+        {
+            code: "/* why is css like this */\n.nav-thing {\n  display: flex;\n  gap: 8px; /* finally gap works in safari */\n}\n.nav-thing > a {\n  color: inherit;\n  text-decoration: none; /* i always forget this */\n}",
+            answer: "human",
+            hint: "Frustrated CSS comments and browser complaints are a human developer mood."
+        },
+        {
+            code: "/**\n * Deeply clones an object, handling circular references,\n * Date objects, RegExp, Maps, and Sets.\n * @template T\n * @param {T} obj - The object to clone.\n * @param {WeakMap} [seen] - Internal tracking for circular refs.\n * @returns {T} A deep clone of the input.\n */\nfunction deepClone(obj, seen = new WeakMap()) {\n  if (obj === null || typeof obj !== 'object') return obj;\n  if (seen.has(obj)) return seen.get(obj);\n  if (obj instanceof Date) return new Date(obj);\n  if (obj instanceof RegExp) return new RegExp(obj);\n  const clone = Array.isArray(obj) ? [] : {};\n  seen.set(obj, clone);\n  for (const key of Object.keys(obj)) {\n    clone[key] = deepClone(obj[key], seen);\n  }\n  return clone;\n}",
+            answer: "ai",
+            hint: "Handles every edge case, uses WeakMap for circular refs, perfect JSDoc - AI thoroughness."
+        },
+        {
+            code: "SELECT u.name, COUNT(o.id) as order_count,\n       SUM(o.total) as lifetime_value\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nWHERE u.created_at > '2024-01-01'\n  -- AND u.is_test = false  (uncomment for prod)\nGROUP BY u.id\nHAVING COUNT(o.id) > 0\nORDER BY lifetime_value DESC\nLIMIT 50;  -- bump this up later",
+            answer: "human",
+            hint: "Commented-out clause, 'uncomment for prod', and 'bump this up later' = human SQL."
+        },
+        {
+            code: "from dataclasses import dataclass, field\nfrom typing import Optional\nfrom datetime import datetime\n\n@dataclass\nclass User:\n    \"\"\"Represents a user entity in the system.\"\"\"\n    id: int\n    username: str\n    email: str\n    created_at: datetime = field(default_factory=datetime.now)\n    is_active: bool = True\n    role: str = \"user\"\n    last_login: Optional[datetime] = None\n\n    def __post_init__(self) -> None:\n        if not self.email or \"@\" not in self.email:\n            raise ValueError(f\"Invalid email: {self.email}\")",
+            answer: "ai",
+            hint: "Perfect dataclass with type hints, validation, and docstring - AI textbook pattern."
+        },
+        {
+            code: "// copied from stackoverflow, modified a bit\nfunction formatBytes(bytes) {\n  if (bytes === 0) return '0 B';\n  const k = 1024;\n  const sizes = ['B', 'KB', 'MB', 'GB'];\n  const i = Math.floor(Math.log(bytes) / Math.log(k));\n  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];\n  // close enough\n}",
+            answer: "human",
+            hint: "'Copied from stackoverflow' and 'close enough' are quintessential human markers."
+        },
+        {
+            code: "const useLocalStorage = <T>(key: string, initialValue: T) => {\n  const [storedValue, setStoredValue] = useState<T>(() => {\n    try {\n      const item = window.localStorage.getItem(key);\n      return item ? JSON.parse(item) : initialValue;\n    } catch (error) {\n      console.error(`Error reading localStorage key \"${key}\":`, error);\n      return initialValue;\n    }\n  });\n\n  const setValue = (value: T | ((val: T) => T)) => {\n    try {\n      const valueToStore = value instanceof Function ? value(storedValue) : value;\n      setStoredValue(valueToStore);\n      window.localStorage.setItem(key, JSON.stringify(valueToStore));\n    } catch (error) {\n      console.error(`Error setting localStorage key \"${key}\":`, error);\n    }\n  };\n\n  return [storedValue, setValue] as const;\n};",
+            answer: "ai",
+            hint: "Generic React hook with full error handling and proper TypeScript - AI-generated pattern."
+        },
+        {
+            code: "# FIXME: this breaks if user has no avatar\n# see ticket JIRA-4521\ndef get_profile_pic(user):\n    url = user.get('avatar', '')\n    if not url:\n        url = '/static/default.png'  # john's cat pic lol\n    return url",
+            answer: "human",
+            hint: "JIRA ticket reference, FIXME, and inside joke about a colleague's cat - human code."
+        },
+        {
+            code: "async function processQueue<T>(\n  items: T[],\n  handler: (item: T) => Promise<void>,\n  concurrency: number = 5\n): Promise<void> {\n  const queue = [...items];\n  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {\n    while (queue.length > 0) {\n      const item = queue.shift()!;\n      await handler(item);\n    }\n  });\n  await Promise.all(workers);\n}",
+            answer: "ai",
+            hint: "Generic concurrent queue with configurable workers and clean TypeScript - AI pattern."
+        },
+        {
+            code: "// idk why but removing this breaks everything\nwindow.addEventListener('load', () => {\n  setTimeout(() => {\n    document.body.classList.add('ready');\n  }, 0); // yes, 0ms timeout is intentional\n});",
+            answer: "human",
+            hint: "'Idk why but removing this breaks everything' is peak human debugging legacy."
+        }
+    ];
+
+    var aivshuState = { round: 0, score: 0, order: [] };
+
+    function shuffleArray(arr) {
+        var a = arr.slice();
+        for (var i = a.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        }
+        return a;
+    }
+
+    var AIVSHU_ROUNDS = 10;
+
+    function aivshuStart() {
+        aivshuState.round = 0;
+        aivshuState.score = 0;
+        var all = shuffleArray(aivshuSnippets.map(function (_, i) { return i; }));
+        aivshuState.order = all.slice(0, AIVSHU_ROUNDS);
+        document.getElementById('aivshu-final').style.display = 'none';
+        aivshuShowRound();
+    }
+
+    function aivshuShowRound() {
+        var idx = aivshuState.order[aivshuState.round];
+        var snippet = aivshuSnippets[idx];
+        document.getElementById('aivshu-round').textContent = aivshuState.round + 1;
+        document.getElementById('aivshu-score').textContent = aivshuState.score;
+        document.getElementById('aivshu-code').textContent = snippet.code;
+        document.getElementById('aivshu-feedback').style.display = 'none';
+        var btns = document.getElementById('aivshu-buttons');
+        btns.style.display = 'flex';
+        btns.querySelectorAll('.aivshu-btn').forEach(function (b) {
+            b.classList.remove('correct', 'wrong');
+            b.disabled = false;
+        });
+    }
+
+    function aivshuAnswer(choice) {
+        var idx = aivshuState.order[aivshuState.round];
+        var snippet = aivshuSnippets[idx];
+        var correct = choice === snippet.answer;
+        if (correct) aivshuState.score++;
+        document.getElementById('aivshu-score').textContent = aivshuState.score;
+
+        var btns = document.querySelectorAll('.aivshu-btn');
+        btns.forEach(function (b) {
+            b.disabled = true;
+            if (b.dataset.answer === snippet.answer) b.classList.add('correct');
+            if (b.dataset.answer === choice && !correct) b.classList.add('wrong');
+        });
+
+        var fb = document.getElementById('aivshu-feedback');
+        fb.style.display = 'block';
+        document.getElementById('aivshu-feedback-icon').textContent = correct ? '✅' : '❌';
+        document.getElementById('aivshu-feedback-text').textContent = correct ? 'Correct!' : 'Wrong!';
+        document.getElementById('aivshu-explanation').textContent = snippet.hint;
+
+        if (aivshuState.round >= aivshuState.order.length - 1) {
+            document.getElementById('aivshu-next-btn').style.display = 'none';
+            setTimeout(aivshuShowFinal, 1500);
+        } else {
+            document.getElementById('aivshu-next-btn').style.display = '';
+        }
+    }
+
+    function aivshuShowFinal() {
+        document.getElementById('aivshu-feedback').style.display = 'none';
+        document.getElementById('aivshu-buttons').style.display = 'none';
+        var finalDiv = document.getElementById('aivshu-final');
+        finalDiv.style.display = 'block';
+        var pct = Math.round((aivshuState.score / aivshuState.order.length) * 100);
+        var icon, title;
+        if (pct >= 88) { icon = '🏆'; title = 'AI Code Detective!'; }
+        else if (pct >= 63) { icon = '🔍'; title = 'Sharp Eye!'; }
+        else { icon = '🤔'; title = 'Keep Practicing!'; }
+        document.getElementById('aivshu-final-icon').textContent = icon;
+        document.getElementById('aivshu-final-title').textContent = title;
+        document.getElementById('aivshu-final-score').textContent = aivshuState.score + ' / ' + aivshuState.order.length + ' correct (' + pct + '%)';
+    }
+
+    // Event listeners
+    var aivshuModal = document.getElementById('aivshu-modal');
+    document.getElementById('open-aivshu-btn').addEventListener('click', function () {
+        aivshuModal.classList.add('active');
+        aivshuStart();
+    });
+    document.getElementById('aivshu-modal-close').addEventListener('click', function () {
+        aivshuModal.classList.remove('active');
+    });
+    aivshuModal.querySelector('.modal-overlay').addEventListener('click', function () {
+        aivshuModal.classList.remove('active');
+    });
+    document.querySelectorAll('.aivshu-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () { aivshuAnswer(this.dataset.answer); });
+    });
+    document.getElementById('aivshu-next-btn').addEventListener('click', function () {
+        aivshuState.round++;
+        aivshuShowRound();
+    });
+    document.getElementById('aivshu-replay-btn').addEventListener('click', aivshuStart);
+
 })();

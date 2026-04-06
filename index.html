@@ -10,9 +10,43 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23g)'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='48' fill='white'%3E%3E_%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20260322-0028">
+    <link rel="stylesheet" href="style.css?v=20260322-0114">
 </head>
 <body>
+
+    <!-- Article Modal -->
+    <div class="article-modal-overlay" id="article-modal-overlay">
+        <div class="article-modal article-modal-card">
+            <button class="article-modal-close" id="article-modal-close" aria-label="Close"><i class="fas fa-times"></i></button>
+            <div class="article-modal-hero" id="article-modal-hero">
+                <div class="article-modal-hero-overlay"></div>
+                <div class="article-modal-hero-content">
+                    <div class="article-modal-badge" id="article-modal-source"></div>
+                    <h2 class="article-modal-title" id="article-modal-title"></h2>
+                    <div class="article-modal-meta" id="article-modal-meta"></div>
+                </div>
+            </div>
+            <div class="article-modal-body">
+                <p class="article-modal-desc" id="article-modal-desc"></p>
+            </div>
+            <div class="article-modal-actions">
+                <a class="article-modal-link article-modal-btn-primary" id="article-modal-link" href="#" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> Read full article</a>
+                <button class="article-modal-btn-copy" id="article-modal-copy" title="Copy link"><i class="fas fa-link"></i> Copy link</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- YouTube Video Modal -->
+    <div class="yt-modal-overlay" id="yt-modal-overlay">
+        <div class="yt-modal">
+            <button class="yt-modal-close" id="yt-modal-close" aria-label="Close"><i class="fas fa-times"></i></button>
+            <div class="yt-modal-player" id="yt-modal-player"></div>
+            <div class="yt-modal-info">
+                <span class="yt-modal-channel" id="yt-modal-channel"></span>
+                <span class="yt-modal-title" id="yt-modal-title"></span>
+            </div>
+        </div>
+    </div>
 
     <nav class="nav">
         <div class="nav-inner">
@@ -24,8 +58,9 @@
                 <a href="#feed" class="nav-link">Feed</a>
                 <a href="#explore" class="nav-link">Explore</a>
                 <a href="#tools" class="nav-link">Tools</a>
-                <a href="#lab" class="nav-link">Lab</a>
-                <a href="#forum" class="nav-link">Forum</a>
+                <a href="#challenge" class="nav-link">Challenge</a>
+                <a href="#digest" class="nav-link">Digest</a>
+                <a href="#challenge" class="nav-link nav-link-break"><i class="fas fa-skull-crossbones"></i> Break it</a>
             </div>
             <div class="nav-actions">
                 <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
@@ -53,8 +88,9 @@
         <a href="#feed" class="mobile-link">Feed</a>
         <a href="#explore" class="mobile-link">Explore</a>
         <a href="#tools" class="mobile-link">Tools</a>
-        <a href="#lab" class="mobile-link">Lab</a>
-        <a href="#forum" class="mobile-link">Forum</a>
+        <a href="#challenge" class="mobile-link">Challenge</a>
+        <a href="#digest" class="mobile-link">Digest</a>
+        <a href="#challenge" class="mobile-link mobile-link-break"><i class="fas fa-skull-crossbones"></i> Break it</a>
     </div>
 
     <header class="hero" id="hero">
@@ -67,14 +103,13 @@
         <div class="hero-content">
             <div class="hero-badge">
                 <span class="pulse-dot"></span>
-                AI & Quality Engineering
+                AI Integration & Quality Management
             </div>
             <h1 class="hero-title">
-                Breaking AI.<br>
-                <span class="gradient-text">Building trust.</span>
+                <span style="white-space:nowrap">AI Testing & Integration.</span><br><span class="gradient-text" style="white-space:nowrap">Building Trust.</span>
             </h1>
             <p class="hero-subtitle">
-                Personal tech hub — exploring LLM testing, red teaming, automation, and everything where AI meets quality.
+                Personal tech hub - exploring LLM testing, red teaming, automation, and everything where AI meets quality.
             </p>
             <div class="hero-stats">
                 <div class="stat-item" data-animate>
@@ -114,16 +149,50 @@
         </div>
     </header>
 
-    <div class="ticker-bar">
-        <div class="ticker-label"><i class="fas fa-signal-stream"></i> LIVE</div>
-        <button class="ticker-arrow ticker-arrow-left" id="ticker-left" aria-label="Scroll left"><i class="fas fa-chevron-left"></i></button>
-        <div class="ticker-track" id="ticker-track">
-            <div class="ticker-content" id="ticker-content">
-                <span class="ticker-item"><i class="fas fa-circle-dot"></i> Loading latest headlines...</span>
+    <div class="ticker-wrapper">
+        <div class="container">
+            <div class="ticker-bar">
+                <div class="ticker-label"><i class="fas fa-signal-stream"></i> LIVE</div>
+                <button class="ticker-arrow ticker-arrow-left" id="ticker-left" aria-label="Scroll left"><i class="fas fa-chevron-left"></i></button>
+                <div class="ticker-track" id="ticker-track">
+                    <div class="ticker-content" id="ticker-content">
+                        <span class="ticker-item"><i class="fas fa-circle-dot"></i> Loading latest headlines...</span>
+                    </div>
+                </div>
+                <button class="ticker-arrow ticker-arrow-right" id="ticker-right" aria-label="Scroll right"><i class="fas fa-chevron-right"></i></button>
             </div>
         </div>
-        <button class="ticker-arrow ticker-arrow-right" id="ticker-right" aria-label="Scroll right"><i class="fas fa-chevron-right"></i></button>
     </div>
+
+    <section class="section yt-section" id="yt-carousel">
+        <div class="container">
+            <div class="yt-carousel-header">
+                <div class="yt-carousel-label"><i class="fab fa-youtube"></i> Trending AI & Tech Videos</div>
+                <div class="yt-carousel-nav">
+                    <button class="yt-arrow" id="yt-arrow-left" aria-label="Previous"><i class="fas fa-chevron-left"></i></button>
+                    <button class="yt-arrow" id="yt-arrow-right" aria-label="Next"><i class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+            <div class="yt-carousel-frame">
+                <div class="yt-carousel-track" id="yt-carousel-track">
+                    <div class="yt-carousel-content" id="yt-carousel-content">
+                <div class="yt-card yt-card-loading">
+                    <div class="yt-card-thumb"><div class="yt-skeleton"></div></div>
+                    <div class="yt-card-info"><span class="yt-skeleton-text"></span><span class="yt-skeleton-text short"></span></div>
+                </div>
+                <div class="yt-card yt-card-loading">
+                    <div class="yt-card-thumb"><div class="yt-skeleton"></div></div>
+                    <div class="yt-card-info"><span class="yt-skeleton-text"></span><span class="yt-skeleton-text short"></span></div>
+                </div>
+                <div class="yt-card yt-card-loading">
+                    <div class="yt-card-thumb"><div class="yt-skeleton"></div></div>
+                    <div class="yt-card-info"><span class="yt-skeleton-text"></span><span class="yt-skeleton-text short"></span></div>
+                </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <section class="section" id="feed">
         <div class="container">
@@ -212,37 +281,37 @@
             </div>
             <div class="tools-grid">
                 <a href="https://www.promptfoo.dev/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=promptfoo.dev&sz=64" alt="Promptfoo" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#10b981"><i class="fas fa-flask"></i></div>
                     <h4>Promptfoo</h4>
                     <p>LLM eval framework</p>
                 </a>
                 <a href="https://playwright.dev/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=playwright.dev&sz=64" alt="Playwright" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#2ecc40"><i class="fas fa-theater-masks"></i></div>
                     <h4>Playwright</h4>
                     <p>E2E test automation</p>
                 </a>
                 <a href="https://www.confident-ai.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=confident-ai.com&sz=64" alt="DeepEval" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#6366f1"><i class="fas fa-chart-bar"></i></div>
                     <h4>DeepEval</h4>
                     <p>LLM testing metrics</p>
                 </a>
                 <a href="https://phoenix.arize.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=arize.com&sz=64" alt="Phoenix" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#06b6d4"><i class="fas fa-eye"></i></div>
                     <h4>Phoenix</h4>
                     <p>AI observability</p>
                 </a>
                 <a href="https://www.langchain.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=langchain.com&sz=64" alt="LangChain" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#1a8c5e"><i class="fas fa-link"></i></div>
                     <h4>LangChain</h4>
                     <p>LLM orchestration</p>
                 </a>
                 <a href="https://docs.ragas.io/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=docs.ragas.io&sz=64" alt="RAGAS" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#f59e0b"><i class="fas fa-bullseye"></i></div>
                     <h4>RAGAS</h4>
                     <p>RAG evaluation</p>
                 </a>
                 <a href="https://www.llamaindex.ai/" target="_blank" rel="noopener" class="tool-card" data-animate>
-                    <div class="tool-icon"><img src="https://www.google.com/s2/favicons?domain=llamaindex.ai&sz=64" alt="LlamaIndex" width="40" height="40"></div>
+                    <div class="tool-icon tool-icon-badge" style="--tool-accent:#a855f7"><i class="fas fa-database"></i></div>
                     <h4>LlamaIndex</h4>
                     <p>RAG framework</p>
                 </a>
@@ -284,7 +353,15 @@
                         <i class="fas fa-columns"></i> Open Tool
                     </button>
                 </div>
-                <div class="lab-card challenge-card" data-animate>
+                <div class="lab-card" data-animate>
+                    <div class="lab-icon"><i class="fas fa-user-secret"></i></div>
+                    <h3>AI or Human?</h3>
+                    <p>Can you tell if code was written by AI or a human? Test your instincts.</p>
+                    <button class="btn btn-glass btn-sm" id="open-aivshu-btn">
+                        <i class="fas fa-play"></i> Play
+                    </button>
+                </div>
+                <div class="lab-card challenge-card" id="challenge" data-animate>
                     <div class="lab-icon"><i class="fas fa-skull-crossbones"></i></div>
                     <h3>Can You Break This AI?</h3>
                     <p>Try prompt injection, jailbreaks, and adversarial attacks. See if you can outsmart the bot — then learn the mitigations.</p>
@@ -406,6 +483,38 @@
         </div>
     </section>
 
+    <!-- AI vs Human Game -->
+    <div class="json-modal" id="aivshu-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content aivshu-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-secret"></i> AI or Human?</h3>
+                <div class="aivshu-score">Round <span id="aivshu-round">1</span>/10 &nbsp; Score: <span id="aivshu-score">0</span></div>
+                <button class="modal-close" id="aivshu-modal-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body aivshu-body">
+                <div class="aivshu-prompt">Who wrote this code?</div>
+                <pre class="aivshu-code" id="aivshu-code"></pre>
+                <div class="aivshu-buttons" id="aivshu-buttons">
+                    <button class="btn btn-glass aivshu-btn" data-answer="human"><i class="fas fa-user"></i> Human</button>
+                    <button class="btn btn-glass aivshu-btn" data-answer="ai"><i class="fas fa-robot"></i> AI Generated</button>
+                </div>
+                <div class="aivshu-feedback" id="aivshu-feedback" style="display:none">
+                    <div class="aivshu-feedback-icon" id="aivshu-feedback-icon"></div>
+                    <div class="aivshu-feedback-text" id="aivshu-feedback-text"></div>
+                    <div class="aivshu-explanation" id="aivshu-explanation"></div>
+                    <button class="btn btn-primary btn-sm" id="aivshu-next-btn"><i class="fas fa-arrow-right"></i> Next</button>
+                </div>
+                <div class="aivshu-final" id="aivshu-final" style="display:none">
+                    <div class="aivshu-final-icon" id="aivshu-final-icon"></div>
+                    <div class="aivshu-final-title" id="aivshu-final-title"></div>
+                    <div class="aivshu-final-score" id="aivshu-final-score"></div>
+                    <button class="btn btn-primary btn-sm" id="aivshu-replay-btn"><i class="fas fa-redo"></i> Play Again</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="json-modal" id="json-modal">
         <div class="modal-overlay"></div>
         <div class="modal-content">
@@ -445,30 +554,6 @@
             </div>
         </div>
     </div>
-
-
-    <section class="section" id="forum">
-        <div class="container">
-            <div class="section-header">
-                <div class="section-badge">
-                    <i class="fas fa-comments"></i> Community
-                </div>
-                <h2 class="section-title">Forum</h2>
-                <p class="section-desc">Share ideas, ask questions, discuss AI & QA topics.</p>
-            </div>
-            <div class="forum-compose" id="forum-compose">
-                <textarea id="forum-input" class="forum-input" placeholder="Write a message... (login required)" maxlength="2000"></textarea>
-                <div class="forum-compose-actions">
-                    <span class="forum-char-count" id="forum-char-count">0 / 2000</span>
-                    <button class="btn btn-primary btn-sm" id="forum-post-btn">Post</button>
-                </div>
-            </div>
-            <div class="forum-posts" id="forum-posts">
-                <div class="feed-loading"><div class="spinner"></div><p>Loading posts...</p></div>
-            </div>
-        </div>
-    </section>
-
     <footer class="footer">
         <div class="container">
             <div class="footer-inner">
@@ -477,20 +562,25 @@
                     <span class="brand-text">alex<span class="brand-accent">pavsky</span></span>
                 </div>
                 <p class="footer-text">Personal tech hub. Built with curiosity.</p>
-                <a href="mailto:alex.pavsky@gmail.com" class="footer-contact-btn"><i class="fas fa-envelope"></i> Contact</a>
-                <form class="newsletter-form" id="newsletter-form">
-                    <p class="newsletter-label"><i class="fas fa-paper-plane"></i> Get AI & QA news straight to your inbox</p>
-                    <div class="newsletter-input-wrap">
-                        <input type="email" id="newsletter-email" placeholder="your@email.com" required>
-                        <button type="submit" class="btn btn-primary btn-sm" id="newsletter-btn">Subscribe</button>
-                    </div>
-                    <p class="newsletter-msg" id="newsletter-msg"></p>
-                </form>
+                <div id="digest">
+                    <form class="newsletter-form" id="newsletter-form">
+                        <p class="newsletter-label"><i class="fas fa-paper-plane"></i> Weekly AI & QA Digest</p>
+                        <div class="newsletter-input-wrap">
+                            <input type="email" id="newsletter-email" placeholder="your@email.com" required>
+                            <button type="submit" class="btn btn-primary btn-sm" id="newsletter-btn">Subscribe</button>
+                        </div>
+                        <p class="newsletter-msg" id="newsletter-msg"></p>
+                    </form>
+                </div>
                 <div class="footer-socials">
                     <a href="https://github.com/qa-apps" target="_blank" rel="noopener" class="social-icon" aria-label="GitHub"><i class="fab fa-github"></i></a>
                     <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon" aria-label="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
+                    <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon social-photo" aria-label="Alex Pavsky profile">
+                        <img src="assets/alex-profile.png" alt="Alex Pavsky">
+                    </a>
                     <a href="mailto:alex.pavsky@gmail.com" class="social-icon" aria-label="Email"><i class="fas fa-envelope"></i></a>
                 </div>
+                <p class="footer-copy-email">info@alexpavsky.com</p>
             </div>
         </div>
     </footer>
@@ -499,7 +589,12 @@
         <button id="chat-toggle" class="chat-toggle" aria-label="Open AI chat">
             <i class="fas fa-robot"></i>
             <span class="chat-badge">AI</span>
+            <span class="chat-notification-dot">1</span>
         </button>
+        <div class="chat-teaser" id="chat-teaser">
+            <span class="chat-teaser-text">👋 Hey! Got a question about AI testing? Ask me anything!</span>
+            <button class="chat-teaser-close" id="chat-teaser-close" aria-label="Close">&times;</button>
+        </div>
         <div id="chat-window" class="chat-window">
             <div class="chat-resize-handle chat-resize-handle-top" id="chat-resize-top"></div>
             <div class="chat-resize-handle chat-resize-handle-left" id="chat-resize-left"></div>
@@ -660,6 +755,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260322-0028"></script>
+    <script src="script.js?v=20260404-0127"></script>
 </body>
 </html>

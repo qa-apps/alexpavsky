@@ -4,19 +4,37 @@ import logging
 import os
 import re
 import sqlite3
+import smtplib
+import ssl
+import threading
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+from email.utils import parsedate_to_datetime
+from html import escape as html_escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("chat")
 
-DB_PATH = Path(__file__).resolve().parent / "chat.db"
+# Store DB outside web root for security
+_data_dir = Path(os.environ.get("DATA_DIR", str(Path.home() / "alexpavsky-data")))
+_data_dir.mkdir(parents=True, exist_ok=True)
+DB_PATH = _data_dir / "chat.db"
 _db_lock = __import__("threading").Lock()
+_newsletter_lock = __import__("threading").Lock()
 
 
 def _init_db():
@@ -60,6 +78,37 @@ def _init_db():
         created_at REAL NOT NULL,
         FOREIGN KEY(user_id) REFERENCES users(id)
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS newsletter_runs (
+        id TEXT PRIMARY KEY,
+        week_key TEXT NOT NULL,
+        run_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        subject TEXT,
+        article_count INTEGER NOT NULL DEFAULT 0,
+        subscriber_count INTEGER NOT NULL DEFAULT 0,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL,
+        completed_at REAL,
+        error TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_newsletter_runs_week ON newsletter_runs(week_key, run_type, status)")
+    c.execute("""CREATE TABLE IF NOT EXISTS newsletter_deliveries (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        email TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error TEXT,
+        created_at REAL NOT NULL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_newsletter_deliveries_run ON newsletter_deliveries(run_id)")
     conn.commit()
     conn.close()
 
@@ -82,8 +131,22 @@ def _hash_ip(ip):
     return hashlib.sha256((ip or "unknown").encode()).hexdigest()[:16]
 
 
-def _hash_pw(password):
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def _hash_pw(password, salt=None):
+    """Hash password with scrypt (salt stored as hex prefix)."""
+    if salt is None:
+        salt = os.urandom(16)
+    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32)
+    return salt.hex() + ":" + dk.hex()
+
+
+def _verify_pw(password, stored_hash):
+    """Verify password against stored scrypt hash. Falls back to legacy SHA-256."""
+    if ":" in stored_hash:
+        salt_hex, _ = stored_hash.split(":", 1)
+        salt = bytes.fromhex(salt_hex)
+        return _hash_pw(password, salt) == stored_hash
+    # Legacy SHA-256 fallback for existing accounts
+    return hashlib.sha256(password.encode("utf-8")).hexdigest() == stored_hash
 
 
 def _db():
@@ -104,11 +167,37 @@ def _get_user_by_token(token):
     return dict(row) if row else None
 
 
+def _admin_login_emails():
+    raw = (
+        os.environ.get("ADMIN_LOGIN_EMAILS")
+        or os.environ.get("ADMIN_LOGIN_EMAIL")
+        or os.environ.get("ADMIN_EMAIL")
+        or "alex.pavsky@gmail.com"
+    )
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _is_admin_email(email):
+    return (email or "").strip().lower() in _admin_login_emails()
+
+
+def _public_user_payload(user):
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "is_admin": _is_admin_email(user.get("email")),
+    }
+
+
 _init_db()
 
 
 def _load_dotenv():
-    env_path = Path(__file__).resolve().parent / ".env"
+    # Look for .env in data dir (outside web root), then fallback to script dir
+    env_path = _data_dir / ".env"
+    if not env_path.exists():
+        env_path = Path(__file__).resolve().parent / ".env"
     if not env_path.exists():
         return
     for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -123,11 +212,76 @@ def _load_dotenv():
 
 _load_dotenv()
 
+MAINTENANCE_FLAG = Path(__file__).resolve().parent / "maintenance.flag"
+MAINTENANCE_KEY = os.environ.get("MAINTENANCE_KEY", "alexpavsky-maint-2026")
+
+def _is_maintenance():
+    return MAINTENANCE_FLAG.exists()
+
+def _toggle_maintenance(on):
+    if on:
+        MAINTENANCE_FLAG.write_text("1")
+    else:
+        MAINTENANCE_FLAG.unlink(missing_ok=True)
+
+MAINTENANCE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Alex Pavsky — Maintenance</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;font-family:Inter,system-ui,sans-serif;color:#e2e8f0}
+.card{text-align:center;padding:60px 40px;max-width:520px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);border-radius:18px;backdrop-filter:blur(12px)}
+h1{font-size:2rem;margin-bottom:12px;color:#f8fafc}
+p{font-size:1.1rem;color:#7dd3fc;margin-bottom:8px}
+.sub{font-size:0.9rem;color:#94a3b8}
+</style></head>
+<body><div class="card">
+<h1>We'll be right back</h1>
+<p>Alex Pavsky site is currently undergoing scheduled maintenance.</p>
+<p class="sub">Please check back shortly. Contact alex.pavsky@gmail.com if urgent.</p>
+</div></body></html>"""
+
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 OPENROUTER_REFERER = "https://alexpavsky.com"
 OPENROUTER_TITLE = "AlexPavsky AI Chat"
+RSS2JSON_API_URL = "https://api.rss2json.com/v1/api.json?rss_url="
+
+RSS_SOURCES = [
+    # AI & LLM
+    {"name": "The Gradient", "url": "https://thegradient.pub/rss/", "category": "ai"},
+    {"name": "Hugging Face", "url": "https://huggingface.co/blog/feed.xml", "category": "ai"},
+    {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/", "category": "ai"},
+    {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "category": "ai"},
+    {"name": "Anthropic", "url": "https://www.anthropic.com/rss.xml", "category": "ai"},
+    {"name": "DeepMind", "url": "https://deepmind.google/blog/rss.xml", "category": "ai"},
+    {"name": "LangChain Blog", "url": "https://blog.langchain.dev/rss/", "category": "ai"},
+    {"name": "Towards AI", "url": "https://pub.towardsai.net/feed", "category": "ai"},
+    {"name": "MIT AI News", "url": "https://news.mit.edu/topic/artificial-intelligence2/feed", "category": "ai"},
+    # QA & Testing
+    {"name": "Software Testing Help", "url": "https://www.softwaretestinghelp.com/feed/", "category": "qa"},
+    {"name": "Cypress Blog", "url": "https://www.cypress.io/blog/rss.xml", "category": "qa"},
+    {"name": "Applitools Blog", "url": "https://applitools.com/blog/feed/", "category": "qa"},
+    {"name": "Testomat Blog", "url": "https://testomat.io/blog/feed/", "category": "qa"},
+    {"name": "MuukTest Blog", "url": "https://muuktest.com/blog/rss.xml", "category": "qa"},
+    {"name": "Mabl Blog", "url": "https://www.mabl.com/blog/rss.xml", "category": "qa"},
+    {"name": "Playwright Blog", "url": "https://playwright.dev/blog/rss.xml", "category": "qa"},
+    # Dev & Engineering
+    {"name": "Martin Fowler", "url": "https://martinfowler.com/feed.atom", "category": "dev"},
+    {"name": "CSS-Tricks", "url": "https://css-tricks.com/feed/", "category": "dev"},
+    {"name": "Smashing Magazine", "url": "https://www.smashingmagazine.com/feed/", "category": "dev"},
+    {"name": "The Pragmatic Engineer", "url": "https://blog.pragmaticengineer.com/rss/", "category": "dev"},
+    {"name": "Dev.to", "url": "https://dev.to/feed", "category": "dev"},
+    {"name": "Hacker News Best", "url": "https://hnrss.org/best", "category": "dev"},
+]
+
+CATEGORY_LABELS = {
+    "ai": "AI & LLM",
+    "qa": "QA & Testing",
+    "dev": "Dev & Engineering",
+}
 
 PROVIDER_KEY_ENV = {
     "groq": "GROQ_API_KEY",
@@ -175,6 +329,692 @@ MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 12000
 MAX_IMAGE_URL_CHARS = 36_000_000
 MAX_BODY_BYTES = 40 * 1024 * 1024
+
+
+def _newsletter_timezone():
+    tz_name = os.environ.get("NEWSLETTER_TIMEZONE", "America/New_York")
+    if ZoneInfo is None:
+        return timezone.utc
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        return timezone.utc
+
+
+def _newsletter_now():
+    return datetime.now(_newsletter_timezone())
+
+
+def _newsletter_weekday():
+    raw = (os.environ.get("NEWSLETTER_WEEKDAY", "mon") or "mon").strip().lower()
+    mapping = {"mon": 0, "monday": 0, "tue": 1, "tuesday": 1, "wed": 2, "wednesday": 2,
+               "thu": 3, "thursday": 3, "fri": 4, "friday": 4, "sat": 5, "saturday": 5,
+               "sun": 6, "sunday": 6}
+    return mapping.get(raw, 0)
+
+
+def _newsletter_schedule_for_week(now):
+    week_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday())
+    return week_start + timedelta(days=_newsletter_weekday(),
+                                  hours=int(os.environ.get("NEWSLETTER_HOUR", "9")),
+                                  minutes=int(os.environ.get("NEWSLETTER_MINUTE", "0")))
+
+
+def _newsletter_week_key(now):
+    iso = now.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def _mail_transport_config():
+    return {
+        "host": os.environ.get("SMTP_HOST", "").strip(),
+        "port": int(os.environ.get("SMTP_PORT", "465") or "465"),
+        "username": (os.environ.get("SMTP_USERNAME") or os.environ.get("SMTP_USER") or "").strip(),
+        "password": (os.environ.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASS") or "").strip(),
+        "from_email": (
+            os.environ.get("SMTP_FROM_EMAIL")
+            or os.environ.get("NEWSLETTER_FROM_EMAIL")
+            or os.environ.get("SMTP_FROM")
+            or os.environ.get("ADMIN_EMAIL")
+            or "alex.pavsky@gmail.com"
+        ).strip(),
+        "from_name": (
+            os.environ.get("SMTP_FROM_NAME")
+            or os.environ.get("NEWSLETTER_FROM_NAME")
+            or "Alex Pavsky"
+        ).strip() or "Alex Pavsky",
+        "admin_email": (os.environ.get("ADMIN_EMAIL") or "alex.pavsky@gmail.com").strip() or "alex.pavsky@gmail.com",
+        "use_ssl": os.environ.get("SMTP_USE_SSL", "1").strip().lower() not in ("0", "false", "no"),
+        "use_starttls": os.environ.get("SMTP_USE_STARTTLS", "0").strip().lower() in ("1", "true", "yes"),
+    }
+
+
+def _mail_transport_ready():
+    cfg = _mail_transport_config()
+    return all((cfg["host"], cfg["username"], cfg["password"], cfg["from_email"], cfg["admin_email"]))
+
+
+def _newsletter_transport_config():
+    mail_cfg = _mail_transport_config()
+    return {
+        "host": mail_cfg["host"],
+        "port": mail_cfg["port"],
+        "username": mail_cfg["username"],
+        "password": mail_cfg["password"],
+        "from_email": (os.environ.get("NEWSLETTER_FROM_EMAIL") or mail_cfg["from_email"]).strip(),
+        "from_name": (os.environ.get("NEWSLETTER_FROM_NAME") or mail_cfg["from_name"]).strip() or "Alex Pavsky",
+        "use_ssl": mail_cfg["use_ssl"],
+        "use_starttls": mail_cfg["use_starttls"],
+    }
+
+
+def _newsletter_transport_ready():
+    cfg = _newsletter_transport_config()
+    required = (cfg["host"], cfg["username"], cfg["password"], cfg["from_email"])
+    return all(required)
+
+
+def _newsletter_fetch_json(url):
+    req = Request(url, headers={"User-Agent": "AlexPavsky Newsletter/1.0"})
+    with urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def _newsletter_parse_date(value):
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+    except Exception:
+        dt = None
+    if dt is None:
+        try:
+            normalized = str(value).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_newsletter_timezone())
+
+
+def _newsletter_category_label(category):
+    return CATEGORY_LABELS.get(category, category or "General")
+
+
+def _newsletter_fetch_articles(days=7, per_source=4):
+    cutoff = _newsletter_now() - timedelta(days=days)
+    seen_links = set()
+    articles = []
+    for source in RSS_SOURCES:
+        try:
+            payload = _newsletter_fetch_json(RSS2JSON_API_URL + quote(source["url"], safe=""))
+            if payload.get("status") != "ok":
+                continue
+            for item in (payload.get("items") or [])[:per_source * 2]:
+                date_str = item.get("pubDate") or item.get("isoDate") or item.get("date") or item.get("published") or ""
+                published_at = _newsletter_parse_date(date_str)
+                if not published_at or published_at < cutoff:
+                    continue
+                link = (item.get("link") or "").strip()
+                if not link or link in seen_links:
+                    continue
+                seen_links.add(link)
+                title = (item.get("title") or "Untitled").strip()
+                description = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", item.get("description") or "")).strip()
+                articles.append({
+                    "title": title,
+                    "link": link,
+                    "description": description[:220],
+                    "source": source["name"],
+                    "category": source["category"],
+                    "published_at": published_at,
+                })
+                if len([a for a in articles if a["source"] == source["name"]]) >= per_source:
+                    break
+        except (HTTPError, URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
+            log.warning("newsletter feed fetch failed for %s: %s", source["name"], exc)
+    articles.sort(key=lambda item: item["published_at"], reverse=True)
+    return articles[: int(os.environ.get("NEWSLETTER_MAX_ARTICLES", "12") or "12")]
+
+
+def _newsletter_subject(articles, now):
+    if articles:
+        newest = articles[0]["published_at"].strftime("%b %d")
+        oldest = articles[-1]["published_at"].strftime("%b %d")
+        return f"Alex Pavsky Weekly AI & QA Digest · {oldest} – {newest}"
+    return f"Alex Pavsky Weekly AI & QA Digest · {_newsletter_week_key(now)}"
+
+
+def _newsletter_render(articles, now):
+    subject = _newsletter_subject(articles, now)
+    site_url = os.environ.get("NEWSLETTER_SITE_URL", "https://www.alexpavsky.com").strip() or "https://www.alexpavsky.com"
+    intro = "Latest AI, QA, and engineering articles from Alex Pavsky's site feed."
+
+    text_lines = [subject, "", intro, ""]
+    html_items = []
+    for article in articles:
+        published = article["published_at"].strftime("%b %d, %Y")
+        text_lines.extend([
+            f"{article['title']}",
+            f"{_newsletter_category_label(article['category'])} · {article['source']} · {published}",
+            article["link"],
+            article["description"],
+            "",
+        ])
+        html_items.append(
+            "<tr><td style='padding:0 0 20px 0;'>"
+            f"<div style='font-size:12px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;'>{html_escape(_newsletter_category_label(article['category']))} · {html_escape(article['source'])} · {html_escape(published)}</div>"
+            f"<a href='{html_escape(article['link'])}' style='font-size:20px;line-height:1.35;font-weight:700;color:#0f172a;text-decoration:none;'>{html_escape(article['title'])}</a>"
+            f"<div style='margin-top:8px;font-size:15px;line-height:1.6;color:#475569;'>{html_escape(article['description'])}</div>"
+            "</td></tr>"
+        )
+
+    text_lines.extend([
+        f"Read more on the site: {site_url}",
+        "",
+        "You subscribed on alexpavsky.com.",
+    ])
+    items_html = "".join(html_items) or "<p style='margin:0;color:#475569;'>No new articles were found this week.</p>"
+
+    html_body = (
+        "<!doctype html><html><body style='margin:0;padding:0;background:#0f172a;font-family:Arial,sans-serif;'>"
+        "<table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background:#0f172a;padding:32px 12px;'>"
+        "<tr><td align='center'>"
+        "<table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='max-width:700px;background:#f8fafc;border-radius:20px;overflow:hidden;'>"
+        "<tr><td style='padding:32px 32px 20px;background:linear-gradient(135deg,#111827,#1e293b);color:#fff;'>"
+        "<div style='font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#7dd3fc;margin-bottom:10px;'>Weekly Digest</div>"
+        f"<h1 style='margin:0 0 10px;font-size:30px;line-height:1.2;'>{html_escape(subject)}</h1>"
+        f"<p style='margin:0;font-size:16px;line-height:1.6;color:#cbd5e1;'>{html_escape(intro)}</p>"
+        "</td></tr>"
+        f"<tr><td style='padding:28px 32px 12px;'>{items_html}</td></tr>"
+        f"<tr><td style='padding:0 32px 32px;'><a href='{html_escape(site_url)}' style='display:inline-block;padding:12px 18px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;'>Open Live Feed</a></td></tr>"
+        "</table></td></tr></table></body></html>"
+    )
+
+    return {
+        "subject": subject,
+        "text": "\n".join(text_lines),
+        "html": html_body,
+    }
+
+
+def _newsletter_subscribers():
+    conn = _db()
+    rows = conn.execute("SELECT email FROM subscribers ORDER BY created_at ASC").fetchall()
+    conn.close()
+    return [row["email"] for row in rows]
+
+
+def _send_mail(recipient, subject, text_body, html_body=None, reply_to=None):
+    cfg = _mail_transport_config()
+    if not _mail_transport_ready():
+        raise RuntimeError("mail_transport_not_configured")
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"{cfg['from_name']} <{cfg['from_email']}>"
+    message["To"] = recipient
+    if reply_to:
+        message["Reply-To"] = reply_to
+    message.set_content(text_body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
+
+    if cfg["use_ssl"]:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(cfg["host"], cfg["port"], context=context, timeout=30) as server:
+            server.login(cfg["username"], cfg["password"])
+            server.send_message(message)
+        return
+
+    with smtplib.SMTP(cfg["host"], cfg["port"], timeout=30) as server:
+        server.ehlo()
+        if cfg["use_starttls"]:
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+        server.login(cfg["username"], cfg["password"])
+        server.send_message(message)
+
+
+def _send_async(fn, *args):
+    def _runner():
+        try:
+            fn(*args)
+        except Exception as exc:
+            log.warning("async email failed: %s", exc)
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+
+def _send_admin_notification(user_name, user_email, message_text):
+    cfg = _mail_transport_config()
+    text_body = (
+        f"New dashboard message from {user_name} <{user_email}>.\n\n"
+        f"Message:\n{message_text}\n\n"
+        "Reply from the Admin Inbox on alexpavsky.com to sync both dashboard and email."
+    )
+    html_body = (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;padding:24px;'>"
+        "<div style='max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;'>"
+        "<div style='font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#6366f1;margin-bottom:10px;'>New Client Message</div>"
+        f"<h2 style='margin:0 0 12px;font-size:22px;'>From {html_escape(user_name)} &lt;{html_escape(user_email)}&gt;</h2>"
+        f"<div style='white-space:pre-wrap;font-size:15px;line-height:1.6;color:#334155;'>{html_escape(message_text)}</div>"
+        "<p style='margin-top:18px;font-size:14px;color:#64748b;'>Reply from the Admin Inbox on alexpavsky.com to sync both dashboard and email.</p>"
+        "</div></body></html>"
+    )
+    return _send_mail(cfg["admin_email"], f"AlexPavsky client message: {user_name}", text_body, html_body, reply_to=user_email)
+
+
+def _send_user_reply_email(user_name, user_email, message_text):
+    cfg = _mail_transport_config()
+    first_name = (user_name or "there").split(" ")[0]
+    text_body = (
+        f"Hi {first_name},\n\n"
+        f"{message_text}\n\n"
+        "You can also see this reply inside your dashboard on alexpavsky.com.\n\n"
+        "Best regards,\n"
+        "Alex Pavsky"
+    )
+    html_body = (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px;'>"
+        "<div style='max-width:640px;margin:0 auto;background:#111827;border:1px solid rgba(255,255,255,0.08);border-radius:18px;padding:28px;'>"
+        f"<div style='font-size:16px;line-height:1.7;color:#e2e8f0;'>Hi {html_escape(first_name)},<br><br>{html_escape(message_text).replace(chr(10), '<br>')}<br><br>"
+        "You can also see this reply inside your dashboard on alexpavsky.com.<br><br>"
+        "Best regards,<br>Alex Pavsky</div>"
+        "</div></body></html>"
+    )
+    return _send_mail(user_email, "Reply from Alex Pavsky", text_body, html_body, reply_to=cfg["admin_email"])
+
+
+def _admin_conversations():
+    conn = _db()
+    rows = conn.execute(
+        """
+        SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.created_at,
+            COUNT(m.id) AS message_count,
+            MAX(m.created_at) AS last_message_at,
+            (
+                SELECT sender FROM messages WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
+            ) AS last_sender,
+            (
+                SELECT text FROM messages WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
+            ) AS last_text
+        FROM users u
+        LEFT JOIN messages m ON m.user_id = u.id
+        GROUP BY u.id
+        ORDER BY COALESCE(MAX(m.created_at), u.created_at) DESC
+        """
+    ).fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        item = dict(row)
+        if _is_admin_email(item.get("email")):
+            continue
+        item["message_count"] = int(item["message_count"] or 0)
+        item["needs_reply"] = item["message_count"] > 0 and item.get("last_sender") == "user"
+        result.append(item)
+    return result
+
+
+def _admin_messages_for_user(user_id):
+    conn = _db()
+    user_row = conn.execute(
+        "SELECT id, name, email, created_at FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+    if not user_row:
+        conn.close()
+        return None
+    if _is_admin_email(user_row["email"]):
+        conn.close()
+        return None
+    msg_rows = conn.execute(
+        "SELECT id, sender, text, created_at FROM messages WHERE user_id = ? ORDER BY created_at ASC",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return {"user": dict(user_row), "messages": [dict(row) for row in msg_rows]}
+
+
+def _newsletter_send_email(recipient, subject, text_body, html_body):
+    cfg = _newsletter_transport_config()
+    if not _newsletter_transport_ready():
+        raise RuntimeError("newsletter_transport_not_configured")
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"{cfg['from_name']} <{cfg['from_email']}>"
+    message["To"] = recipient
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+
+    if cfg["use_ssl"]:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(cfg["host"], cfg["port"], context=context, timeout=30) as server:
+            server.login(cfg["username"], cfg["password"])
+            server.send_message(message)
+        return
+
+    with smtplib.SMTP(cfg["host"], cfg["port"], timeout=30) as server:
+        server.ehlo()
+        if cfg["use_starttls"]:
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+        server.login(cfg["username"], cfg["password"])
+        server.send_message(message)
+
+
+def _newsletter_should_run(now=None):
+    now = now or _newsletter_now()
+    scheduled_at = _newsletter_schedule_for_week(now)
+    if now < scheduled_at:
+        return False, _newsletter_week_key(now)
+    week_key = _newsletter_week_key(now)
+    conn = _db()
+    row = conn.execute(
+        "SELECT 1 FROM newsletter_runs WHERE week_key = ? AND run_type = 'scheduled' AND status = 'sent' LIMIT 1",
+        (week_key,),
+    ).fetchone()
+    conn.close()
+    return row is None, week_key
+
+
+def _newsletter_run(run_type="manual", force=False):
+    now = _newsletter_now()
+    should_run, week_key = _newsletter_should_run(now)
+    if run_type == "scheduled" and not force and not should_run:
+        return {"ok": True, "status": "skipped", "reason": "not_due", "week_key": week_key}
+
+    articles = _newsletter_fetch_articles(days=int(os.environ.get("NEWSLETTER_DIGEST_DAYS", "7") or "7"))
+    payload = _newsletter_render(articles, now)
+    subscribers = _newsletter_subscribers()
+
+    if not subscribers:
+        return {
+            "ok": True,
+            "status": "skipped",
+            "reason": "no_subscribers",
+            "week_key": week_key,
+            "article_count": len(articles),
+            "subject": payload["subject"],
+        }
+
+    if not _newsletter_transport_ready():
+        return {
+            "ok": False,
+            "status": "dry_run",
+            "reason": "newsletter_transport_not_configured",
+            "week_key": week_key,
+            "article_count": len(articles),
+            "subscriber_count": len(subscribers),
+            "subject": payload["subject"],
+            "preview_html": payload["html"],
+        }
+
+    with _newsletter_lock:
+        run_id = uuid.uuid4().hex
+        with _db_lock:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.execute(
+                "INSERT INTO newsletter_runs (id, week_key, run_type, status, subject, article_count, subscriber_count, sent_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, week_key, run_type, "running", payload["subject"], len(articles), len(subscribers), 0, time.time()),
+            )
+            conn.commit()
+            conn.close()
+
+        sent_count = 0
+        errors = []
+        for email in subscribers:
+            try:
+                _newsletter_send_email(email, payload["subject"], payload["text"], payload["html"])
+                status = "sent"
+                error = ""
+                sent_count += 1
+            except Exception as exc:
+                status = "failed"
+                error = str(exc)[:500]
+                errors.append(f"{email}: {error}")
+            with _db_lock:
+                conn = sqlite3.connect(str(DB_PATH))
+                conn.execute(
+                    "INSERT INTO newsletter_deliveries (id, run_id, email, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (uuid.uuid4().hex, run_id, email, status, error, time.time()),
+                )
+                conn.commit()
+                conn.close()
+
+        final_status = "sent" if sent_count == len(subscribers) else ("partial" if sent_count else "failed")
+        with _db_lock:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.execute(
+                "UPDATE newsletter_runs SET status = ?, sent_count = ?, completed_at = ?, error = ? WHERE id = ?",
+                (final_status, sent_count, time.time(), "\n".join(errors)[:2000], run_id),
+            )
+            conn.commit()
+            conn.close()
+
+    return {
+        "ok": sent_count > 0,
+        "status": final_status,
+        "week_key": week_key,
+        "article_count": len(articles),
+        "subscriber_count": len(subscribers),
+        "sent_count": sent_count,
+        "subject": payload["subject"],
+        "errors": errors[:5],
+    }
+
+
+def _newsletter_preview():
+    now = _newsletter_now()
+    articles = _newsletter_fetch_articles(days=int(os.environ.get("NEWSLETTER_DIGEST_DAYS", "7") or "7"))
+    payload = _newsletter_render(articles, now)
+    return {
+        "ok": True,
+        "week_key": _newsletter_week_key(now),
+        "article_count": len(articles),
+        "subject": payload["subject"],
+        "html": payload["html"],
+        "text": payload["text"],
+        "transport_ready": _newsletter_transport_ready(),
+        "subscriber_count": len(_newsletter_subscribers()),
+    }
+
+
+def _newsletter_status():
+    conn = _db()
+    subscribers = conn.execute("SELECT COUNT(*) AS count FROM subscribers").fetchone()["count"]
+    last_run = conn.execute(
+        "SELECT week_key, run_type, status, subject, article_count, subscriber_count, sent_count, created_at, completed_at FROM newsletter_runs ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return {
+        "ok": True,
+        "transport_ready": _newsletter_transport_ready(),
+        "subscriber_count": subscribers,
+        "schedule": {
+            "weekday": _newsletter_weekday(),
+            "hour": int(os.environ.get("NEWSLETTER_HOUR", "9") or "9"),
+            "minute": int(os.environ.get("NEWSLETTER_MINUTE", "0") or "0"),
+            "timezone": os.environ.get("NEWSLETTER_TIMEZONE", "America/New_York"),
+        },
+        "last_run": dict(last_run) if last_run else None,
+    }
+
+
+def _newsletter_scheduler_loop():
+    interval = int(os.environ.get("NEWSLETTER_CHECK_INTERVAL_SECONDS", "1800") or "1800")
+    while True:
+        try:
+            if _newsletter_transport_ready():
+                result = _newsletter_run(run_type="scheduled")
+                if result.get("status") not in ("skipped",):
+                    log.info("newsletter scheduler result: %s", result)
+        except Exception as exc:
+            log.warning("newsletter scheduler error: %s", exc)
+        time.sleep(max(60, interval))
+
+
+_feed_cache = {"fetched_at": 0.0, "articles": []}
+
+
+def _feed_tag_name(tag):
+    return str(tag).split("}", 1)[-1].lower()
+
+
+def _feed_child_text(node, names):
+    names = set(names)
+    for child in list(node):
+        if _feed_tag_name(child.tag) in names:
+            return " ".join("".join(child.itertext()).split()).strip()
+    return ""
+
+
+def _feed_entry_link(node):
+    for child in list(node):
+        if _feed_tag_name(child.tag) != "link":
+            continue
+        href = (child.get("href") or "").strip()
+        if href:
+            rel = (child.get("rel") or "alternate").strip().lower()
+            if rel in ("alternate", ""):
+                return href
+        text = " ".join("".join(child.itertext()).split()).strip()
+        if text:
+            return text
+    return ""
+
+
+def _feed_extract_nodes(root, target_name):
+    return [node for node in root.iter() if _feed_tag_name(node.tag) == target_name]
+
+
+def _feed_fetch_source(source, limit=18):
+    req = Request(
+        source["url"],
+        headers={
+            "User-Agent": "AlexPavsky Feed/1.0",
+            "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    with urlopen(req, timeout=20) as resp:
+        xml_bytes = resp.read()
+
+    root = ET.fromstring(xml_bytes)
+    items = _feed_extract_nodes(root, "item")
+    entries = items if items else _feed_extract_nodes(root, "entry")
+    results = []
+
+    for node in entries[:limit]:
+        title = _feed_child_text(node, {"title"}) or "Untitled"
+        link = _feed_child_text(node, {"link"}) or _feed_entry_link(node)
+        description = _feed_child_text(node, {"description", "summary", "content", "encoded"})
+        raw_date = _feed_child_text(node, {"pubdate", "published", "updated", "dc:date", "date"})
+        published_at = _newsletter_parse_date(raw_date)
+        results.append({
+            "title": title,
+            "link": link,
+            "description": description[:220],
+            "date": published_at.isoformat() if published_at else "",
+            "source": source["name"],
+            "category": source["category"],
+        })
+
+    return results
+
+
+def _feed_collect_articles():
+    now = _newsletter_now()
+    cutoff = now - timedelta(days=30)
+    articles = []
+    seen_links = set()
+
+    for source in RSS_SOURCES:
+        try:
+            items = _feed_fetch_source(source, limit=20)
+        except Exception as exc:
+            log.warning("feed fetch failed for %s: %s", source["name"], exc)
+            continue
+        for item in items:
+            if not item["link"] or item["link"] in seen_links:
+                continue
+            published_at = _newsletter_parse_date(item["date"])
+            if not published_at or published_at < cutoff:
+                continue
+            seen_links.add(item["link"])
+            articles.append(item)
+
+    articles.sort(key=lambda item: _newsletter_parse_date(item["date"]) or datetime.fromtimestamp(0, tz=timezone.utc), reverse=True)
+    return articles
+
+
+def _feed_cached_articles():
+    ttl = int(os.environ.get("FEED_CACHE_SECONDS", "1800") or "1800")
+    now_ts = time.time()
+    if _feed_cache["articles"] and now_ts - _feed_cache["fetched_at"] < ttl:
+        return _feed_cache["articles"]
+    articles = _feed_collect_articles()
+    _feed_cache["articles"] = articles
+    _feed_cache["fetched_at"] = now_ts
+    return articles
+
+
+# ─── YouTube Feed ─────────────────────────────────────────────────────────────
+
+YOUTUBE_SOURCES = [
+    {"name": "AI Explained",      "channel_id": "UCNJ1Ymd5yFuUPtn21xtRbbw"},
+    {"name": "Yannic Kilcher",     "channel_id": "UCZHmQk67mSJgfCCTn7xBfew"},
+    {"name": "Two Minute Papers",  "channel_id": "UCbfYPyITQ-7l4upoX8nvctg"},
+    {"name": "Fireship",           "channel_id": "UCsBjURrPoezykLs9EqgamOA"},
+    {"name": "Lex Fridman",        "channel_id": "UCSHZKyawb77ixDdsGog4iWA"},
+    {"name": "OpenAI",             "channel_id": "UCXZCJLdBC09xxP5Tja2vPzw"},
+]
+
+_youtube_cache: dict = {"fetched_at": 0.0, "videos": []}
+
+
+def _yt_video_id(url: str) -> str:
+    import re as _re
+    m = _re.search(r"[?&]v=([A-Za-z0-9_\-]+)", url or "")
+    return m.group(1) if m else ""
+
+
+def _youtube_collect() -> list:
+    cutoff = _newsletter_now() - timedelta(days=14)
+    results = []
+    for src in YOUTUBE_SOURCES:
+        try:
+            feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={src['channel_id']}"
+            items = _feed_fetch_source({"name": src["name"], "url": feed_url, "category": "youtube"}, limit=10)
+            for item in items:
+                published = _newsletter_parse_date(item.get("date", ""))
+                if published and published >= cutoff:
+                    vid = _yt_video_id(item.get("link", ""))
+                    item["source"] = src["name"]
+                    item["thumb"] = f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg" if vid else ""
+                    results.append(item)
+        except Exception as exc:
+            log.warning("youtube fetch failed for %s: %s", src["name"], exc)
+    results.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return results[:40]
+
+
+def _youtube_cached_videos() -> list:
+    ttl = 43200  # 12 hours
+    now_ts = time.time()
+    if _youtube_cache["videos"] and now_ts - _youtube_cache["fetched_at"] < ttl:
+        return _youtube_cache["videos"]
+    videos = _youtube_collect()
+    _youtube_cache["videos"] = videos
+    _youtube_cache["fetched_at"] = now_ts
+    return videos
+
 
 SYSTEM_PROMPT = (
     "You are a helpful AI assistant on Alex Pavsky's personal tech hub. "
@@ -470,6 +1310,15 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _html(self, status, html):
+        data = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self._cors()
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _client_ip(self):
         forwarded = self.headers.get("X-Forwarded-For", "")
         return forwarded.split(",")[0].strip() if forwarded else self.client_address[0]
@@ -478,19 +1327,472 @@ class Handler(SimpleHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         return auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
 
+    def _get_admin_user(self):
+        user = _get_user_by_token(self._get_token())
+        if user and _is_admin_email(user.get("email")):
+            return user
+        return None
+
     def _read_body(self):
         length = int(self.headers.get("Content-Length", "0"))
         return json.loads(self.rfile.read(length).decode()) if length > 0 else {}
 
+    def _maintenance_cookie(self, value: str, max_age: int) -> str:
+        host = (self.headers.get("Host", "") or "").split(":", 1)[0].lower()
+        is_local = host in {"127.0.0.1", "localhost", "::1"}
+        parts = [f"maint_bypass={value}", "Path=/", f"Max-Age={max_age}", "SameSite=Lax", "HttpOnly"]
+        if not is_local:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def _check_maintenance_bypass(self):
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        if qs.get("mkey", [None])[0] == MAINTENANCE_KEY:
+            return True
+        try:
+            from http.cookies import SimpleCookie
+            c = SimpleCookie()
+            c.load(self.headers.get("Cookie", ""))
+            v = c.get("maint_bypass")
+            return bool(v and v.value == MAINTENANCE_KEY)
+        except Exception:
+            return False
+
+    def _redirect_with_cookie(self, location, cookie):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Set-Cookie", cookie)
+        self._cors()
+        self.end_headers()
+
+    def _send_json_with_cookie(self, status, payload, cookie):
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Set-Cookie", cookie)
+        self._cors()
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
-        if self.path == "/api/auth/me":
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/maintenance-ui":
+            qs = parse_qs(parsed.query)
+            key = qs.get("key", [None])[0]
+            cookie_on = self._maintenance_cookie(MAINTENANCE_KEY, 2592000)
+            has_bypass = self._check_maintenance_bypass()
+            if not has_bypass and key == MAINTENANCE_KEY:
+                self._redirect_with_cookie("/api/maintenance-ui", cookie_on)
+                return
+
+            if not has_bypass:
+                self._html(
+                    200,
+                    """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alex Pavsky — Owner Login</title>
+  <style>
+    :root{--bg:#0b1020;--card:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e7e9ff;--muted:rgba(231,233,255,.75);--accent:#7c3aed}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:var(--text)}
+    .card{width:min(520px,92vw);padding:22px 22px 18px;border:1px solid var(--border);background:var(--card);border-radius:18px;backdrop-filter: blur(12px)}
+    h1{font-size:18px;margin:0 0 10px 0}
+    .muted{color:var(--muted);font-size:12px;line-height:1.35}
+    form{margin-top:14px;display:flex;gap:10px}
+    input{flex:1;border:1px solid var(--border);background:rgba(255,255,255,.06);color:var(--text);padding:10px 12px;border-radius:12px;font-size:13px;outline:none}
+    button{appearance:none;border:1px solid var(--border);background:rgba(255,255,255,.1);color:var(--text);padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
+    button:hover{background:var(--text);color:#0f172a}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Restricted Access</h1>
+    <div class="muted">Site maintenance tools require owner access.</div>
+    <form id="mform">
+      <input type="password" id="mkey" placeholder="Enter owner key..." autofocus />
+      <button type="submit">Unlock</button>
+    </form>
+    <div id="merr" style="color:#ef4444;font-size:12px;margin-top:10px;display:none;"></div>
+  </div>
+  <script>
+    document.getElementById('mform').onsubmit = async (e) => {
+      e.preventDefault();
+      const k = document.getElementById('mkey').value.trim();
+      if(!k) return;
+      try{
+        const r = await fetch(`/api/maintenance-login`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({key: k})
+        });
+        if(r.ok){
+          location.href = '/api/maintenance-ui';
+        }else{
+          document.getElementById('merr').textContent = 'Invalid key';
+          document.getElementById('merr').style.display = 'block';
+        }
+      }catch(err){ console.error(err); }
+    };
+  </script>
+</body>
+</html>"""
+                )
+                return
+
+            self._html(
+                200,
+                """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alex Pavsky — Maintenance Portal</title>
+  <style>
+    :root{--bg:#0b1020;--card:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e7e9ff;--muted:rgba(231,233,255,.75);--accent:#7c3aed;}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:var(--text)}
+    .card{width:min(520px,92vw);padding:24px;border:1px solid var(--border);background:var(--card);border-radius:18px;backdrop-filter: blur(12px)}
+    .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+    h1{font-size:18px;margin:0}
+    .muted{color:var(--muted);font-size:13px;line-height:1.4}.mt-3{margin-top:12px}.mb-4{margin-bottom:16px}
+    .btn{appearance:none;border:1px solid var(--border);background:transparent;color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;text-decoration:none}
+    .btn:hover{background:rgba(255,255,255,.05)}
+    .switch{display:inline-block;width:90px;height:42px;position:relative;border-radius:99px;background:#ef4444;transition:background .3s;cursor:pointer}
+    .switch::after{content:'OFFLINE';font-size:10px;font-weight:700;position:absolute;right:12px;top:15px;color:#fff}
+    .switch.on{background:#22c55e}
+    .switch.on::after{content:'ONLINE';left:14px;right:auto;color:#fff}
+    .knob{position:absolute;width:34px;height:34px;border-radius:50%;background:#ffffff;top:4px;left:4px;transition:transform .3s, box-shadow .2s;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+    .switch.on .knob{transform:translateX(48px)}
+    .legend{font-size:13px;color:var(--text);margin-top:20px;padding:12px;border-radius:12px;background:rgba(0,0,0,.2)}
+    .legend b{color:#fff;}
+    #statusMain{font-weight:600;font-size:16px;margin:18px 0 2px 0}
+    #statusSub{font-size:12px;color:rgba(255,255,255,.5)}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="top">
+      <h1>Site Status</h1>
+      <button class="btn" id="logoutBtn">Logout</button>
+    </div>
+    <div class="muted">Control whether standard visitors can view the website and chat interface, or if they see the maintenance splash screen.</div>
+    <div style="text-align:center;margin-top:32px;">
+      <label class="switch" title="Site accessible / under maintenance">
+        <input type="checkbox" id="maintSwitch" style="display:none" />
+        <div class="knob"></div>
+      </label>
+      <div id="statusMain">Checking...</div>
+      <div id="statusSub">-</div>
+    </div>
+    
+    <div class="legend" style="margin-top:30px">
+      - Toggle <b>right</b> = <b>Site accessible</b> (maintenance OFF)<br>
+      - Toggle <b>left</b> = <b>Site under maintenance</b> (maintenance ON)<br><br>
+        <div style="font-size:11px;color:rgba(255,255,255,.5);line-height:1.4">
+          As long as you are logged into this portal, you bypass the maintenance screen and can view the site normally. Wait 1 min for DNS/CDN changes though!
+        </div>
+    </div>
+  </div>
+
+  <script>
+    const logoutBtn = document.getElementById('logoutBtn');
+    const switchWrap = document.querySelector('.switch');
+    const box = document.getElementById('maintSwitch');
+    const statusMain = document.getElementById('statusMain');
+    const statusSub = document.getElementById('statusSub');
+
+    function paint(maintenance){
+      const isOnline = !maintenance;
+      box.checked = isOnline;
+      if(isOnline){
+        switchWrap.classList.add('on');
+        statusMain.textContent = 'Site is functional';
+        statusSub.textContent = 'maintenance: OFF';
+      }else{
+        switchWrap.classList.remove('on');
+        statusMain.textContent = 'Site is offline (maintenance)';
+        statusSub.textContent = 'maintenance: ON';
+      }
+    }
+
+    async function load(){
+      const r = await fetch(`/api/maintenance`, {cache:'no-store'});
+      if(!r.ok) return location.reload();
+      const j = await r.json();
+      paint(!!j.maintenance);
+    }
+    
+    async function toggleState(wantOnline){
+      box.disabled = true;
+      const action = wantOnline ? 'open' : 'close';
+      const r = await fetch(`/api/maintenance?action=${action}`, {cache:'no-store'});
+      if(r.ok){
+        const j = await r.json();
+        paint(!!j.maintenance);
+      }
+      box.disabled = false;
+    }
+
+    box.addEventListener('change', () => {
+      toggleState(box.checked);
+    });
+
+    logoutBtn.onclick = async () => {
+      if(confirm("Logout from Owner Mode? You'll still see maintenance but cannot control it.")){
+        const r = await fetch(`/api/maintenance?action=logout`, {cache:'no-store'});
+        location.reload();
+      }
+    };
+    load();
+  </script>
+</body>
+</html>"""
+            )
+            return
+
+        if path == "/api/maintenance":
+            qs = parse_qs(parsed.query)
+            action = qs.get("action", ["status"])[0]
+            key = qs.get("key", [None])[0]
+
+            if key != MAINTENANCE_KEY and not self._check_maintenance_bypass():
+                self._json(403, {"error": "unauthorized"})
+                return
+
+            cookie_on = self._maintenance_cookie(MAINTENANCE_KEY, 2592000)
+            cookie_off = self._maintenance_cookie("", 0)
+
+            if action == "close":
+                _toggle_maintenance(True)
+                self._send_json_with_cookie(200, {"maintenance": True, "message": "Site is now OFFLINE"}, cookie_on)
+            elif action == "open":
+                _toggle_maintenance(False)
+                self._send_json_with_cookie(200, {"maintenance": False, "message": "Site is now ONLINE"}, cookie_on)
+            elif action == "logout":
+                self._send_json_with_cookie(200, {"maintenance": _is_maintenance(), "logged_out": True}, cookie_off)
+            else:
+                self._json(200, {"maintenance": _is_maintenance()})
+            return
+
+        if _is_maintenance() and not self._check_maintenance_bypass() and path not in ("/api/auth/login", "/api/maintenance-login"):
+            if not path.startswith("/api/"):
+                self._html(503, MAINTENANCE_HTML)
+                return
+            self._json(503, {"error": "maintenance", "message": "Site is currently down for maintenance"})
+            return
+
+        if path == "/api/article-proxy":
+            qs = parse_qs(parsed.query)
+            url = qs.get("url", [""])[0]
+            if not url:
+                self._json(400, {"error": "Missing url param"})
+                return
+            try:
+                req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AlexPavskyBot/1.0)"})
+                with urlopen(req, timeout=8) as resp:
+                    raw = resp.read(500_000).decode("utf-8", errors="replace")
+                # Extract readable content: try <article>, <main>, or body
+                import re as _re
+                content = ""
+                for tag in ["article", "main", '[role="main"]']:
+                    m = _re.search(r'<' + tag + r'[^>]*>(.*?)</' + tag + '>', raw, _re.DOTALL | _re.IGNORECASE)
+                    if m:
+                        content = m.group(1)
+                        break
+                if not content:
+                    m = _re.search(r'<body[^>]*>(.*?)</body>', raw, _re.DOTALL | _re.IGNORECASE)
+                    content = m.group(1) if m else raw
+                # Strip scripts, styles, navs, footers, headers
+                for strip_tag in ["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript", "svg"]:
+                    content = _re.sub(r'<' + strip_tag + r'[^>]*>.*?</' + strip_tag + '>', '', content, flags=_re.DOTALL | _re.IGNORECASE)
+                # Strip HTML tags to get plain text, keep paragraphs
+                content = _re.sub(r'<(p|h[1-6]|li|br|div)[^>]*>', '\n\n', content, flags=_re.IGNORECASE)
+                content = _re.sub(r'<[^>]+>', '', content)
+                content = _re.sub(r'\n{3,}', '\n\n', content).strip()
+                # Limit length
+                if len(content) > 5000:
+                    content = content[:5000] + "..."
+                # Extract OG image
+                og_img = ""
+                og_match = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', raw, _re.IGNORECASE)
+                if not og_match:
+                    og_match = _re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', raw, _re.IGNORECASE)
+                if og_match:
+                    og_img = og_match.group(1)
+                self._json(200, {"content": content, "url": url, "image": og_img})
+            except Exception as e:
+                self._json(502, {"error": str(e), "url": url})
+            return
+        if path == "/api/feed":
+            self._json(200, {"articles": _feed_cached_articles()})
+            return
+        if path == "/api/youtube":
+            self._json(200, {"videos": _youtube_cached_videos()})
+            return
+        if path == "/api/health":
+            self._json(200, {
+                "status": "ok",
+                "service": "alexpavsky-chat-server",
+                "port": int(os.environ.get("CHAT_PORT", "8000")),
+                "providers": {
+                    provider: bool(os.environ.get(env_key))
+                    for provider, env_key in PROVIDER_KEY_ENV.items()
+                }
+            })
+            return
+        if path == "/api/newsletter/status":
+            if not self._get_admin_user():
+                self._json(403, {"error": "admin_auth_required"})
+                return
+            self._json(200, _newsletter_status())
+            return
+        if path == "/api/newsletter/preview":
+            if not self._get_admin_user():
+                self._json(403, {"error": "admin_auth_required"})
+                return
+            self._json(200, _newsletter_preview())
+            return
+        if path == "/api/admin-inbox":
+            if not self._get_admin_user():
+                self._html(403, "<h1>403 Forbidden</h1>")
+                return
+            self._html(200, """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alex Pavsky — Admin Inbox</title>
+  <style>
+    :root{--bg:#0b1020;--card:rgba(255,255,255,.06);--card2:rgba(255,255,255,.04);--border:rgba(255,255,255,.12);--text:#e7e9ff;--muted:rgba(231,233,255,.72);--accent:#6366f1}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 20% 10%, rgba(99,102,241,.22), transparent 55%),radial-gradient(900px 540px at 80% 75%, rgba(6,182,212,.16), transparent 60%),var(--bg);font-family:Inter,system-ui,sans-serif;color:var(--text)}
+    .shell{max-width:1320px;margin:0 auto;padding:24px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}.title{font-size:22px;font-weight:700}.top-actions{display:flex;gap:10px;flex-wrap:wrap}
+    .pill{padding:8px 12px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted)}.pill.ok{border-color:rgba(34,197,94,.45);color:#bbf7d0}.pill.bad{border-color:rgba(239,68,68,.45);color:#fecaca}
+    .btn{appearance:none;border:1px solid var(--border);background:rgba(255,255,255,.06);color:var(--text);padding:10px 14px;border-radius:12px;font-size:13px;cursor:pointer;text-decoration:none}.btn.primary{border-color:rgba(99,102,241,.55);background:rgba(99,102,241,.18)}
+    .layout{display:grid;grid-template-columns:360px 1fr;gap:16px}.panel{border:1px solid var(--border);background:var(--card);border-radius:18px;backdrop-filter:blur(12px);min-height:74vh}
+    .sidebar-head,.thread-head{padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.08)}.sidebar-head strong,.thread-head strong{display:block;font-size:15px}.sidebar-head span,.thread-head span{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
+    .conversation-list{padding:10px;display:flex;flex-direction:column;gap:8px;max-height:calc(74vh - 78px);overflow:auto}.conversation-item{padding:14px;border:1px solid rgba(255,255,255,.08);background:var(--card2);border-radius:14px;cursor:pointer;transition:.18s}
+    .conversation-item:hover,.conversation-item.active{border-color:rgba(99,102,241,.45);background:rgba(99,102,241,.12)}.conversation-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.conversation-name{font-weight:650}.conversation-time{font-size:11px;color:var(--muted)}
+    .conversation-email{margin-top:3px;font-size:12px;color:var(--muted)}.conversation-preview{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.4}.badge{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid rgba(34,197,94,.3);color:#bbf7d0;background:rgba(34,197,94,.08)}
+    .thread{display:flex;flex-direction:column;height:74vh}.thread-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}.msg{max-width:78%;padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);line-height:1.45;white-space:pre-wrap}.msg.user{align-self:flex-start;background:rgba(255,255,255,.05)}.msg.admin{align-self:flex-end;background:rgba(99,102,241,.18);border-color:rgba(99,102,241,.35)}
+    .msg-time{margin-top:6px;font-size:11px;color:var(--muted)}.thread-empty{margin:auto;color:var(--muted);text-align:center;padding:24px}.reply-box{padding:16px 18px;border-top:1px solid rgba(255,255,255,.08)}.reply-status{min-height:18px;margin-bottom:8px;font-size:12px;color:var(--muted)}.reply-status.error{color:#fecaca}.reply-status.success{color:#bbf7d0}
+    .reply-form{display:flex;gap:10px}.reply-form textarea{flex:1;min-height:92px;resize:vertical;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:var(--text);padding:12px 14px;border-radius:14px;font:inherit;outline:none}.reply-form button{align-self:flex-end}
+    @media (max-width:960px){.layout{grid-template-columns:1fr}.panel{min-height:auto}.conversation-list{max-height:320px}.thread{height:auto;min-height:70vh}.msg{max-width:90%}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="top">
+      <div class="title">Admin Inbox</div>
+      <div class="top-actions">
+        <div class="pill" id="emailStatus">Checking email setup…</div>
+        <a class="btn" href="/">Back to site</a>
+        <button class="btn primary" id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+    <div class="layout">
+      <div class="panel">
+        <div class="sidebar-head">
+          <strong>Client conversations</strong>
+          <span>Reply here to sync the user dashboard and email at the same time.</span>
+        </div>
+        <div class="conversation-list" id="conversationList"><div class="thread-empty">Loading users…</div></div>
+      </div>
+      <div class="panel thread">
+        <div class="thread-head">
+          <strong id="threadTitle">Select a conversation</strong>
+          <span id="threadMeta">Messages sent here are stored in the client dashboard and emailed from alex.pavsky@gmail.com.</span>
+        </div>
+        <div class="thread-messages" id="threadMessages"><div class="thread-empty">Choose a user on the left.</div></div>
+        <div class="reply-box">
+          <div class="reply-status" id="replyStatus"></div>
+          <form class="reply-form" id="replyForm">
+            <textarea id="replyInput" placeholder="Write a reply to the selected user…" required></textarea>
+            <button class="btn primary" type="submit">Send reply</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const authToken = localStorage.getItem('auth_token') || '';
+    const conversationList = document.getElementById('conversationList');
+    const threadTitle = document.getElementById('threadTitle');
+    const threadMeta = document.getElementById('threadMeta');
+    const threadMessages = document.getElementById('threadMessages');
+    const replyForm = document.getElementById('replyForm');
+    const replyInput = document.getElementById('replyInput');
+    const replyStatus = document.getElementById('replyStatus');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const emailStatus = document.getElementById('emailStatus');
+    let conversations = [];
+    let currentUserId = '';
+    function escapeHtml(value){return String(value || '').replace(/[&<>\"']/g, ch => ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '\"' ? '&quot;' : '&#39;');}
+    function formatTime(ts){if(!ts) return 'No messages'; const d=new Date(ts*1000); return d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});}
+    async function api(url, options){const req=Object.assign({cache:'no-store'}, options || {}); req.headers=Object.assign({}, req.headers || {}, authToken ? {Authorization:'Bearer '+authToken} : {}); const res=await fetch(url, req); if(res.status===401||res.status===403) throw new Error('admin_auth_required'); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || data.message || 'request_failed'); return data;}
+    async function loadEmailStatus(){try{const data=await api('/api/admin/email-status'); if(data.ready){emailStatus.className='pill ok'; emailStatus.textContent='Email ready: '+data.from;} else {emailStatus.className='pill bad'; emailStatus.textContent='Email not configured';}}catch(_err){emailStatus.className='pill bad'; emailStatus.textContent='Email status unavailable';}}
+    function renderConversationList(){if(!conversations.length){conversationList.innerHTML='<div class=\"thread-empty\">No client conversations yet.</div>'; return;} conversationList.innerHTML=conversations.map(c=>{const badge=c.needs_reply?'<span class=\"badge\">Needs reply</span>':''; return '<div class=\"conversation-item '+(c.id===currentUserId?'active':'')+'\" data-user-id=\"'+escapeHtml(c.id)+'\"><div class=\"conversation-top\"><div class=\"conversation-name\">'+escapeHtml(c.name)+'</div><div class=\"conversation-time\">'+escapeHtml(formatTime(c.last_message_at || c.created_at))+'</div></div><div class=\"conversation-email\">'+escapeHtml(c.email)+'</div><div class=\"conversation-preview\">'+(badge?badge+' · ':'')+escapeHtml(c.last_text || 'No messages yet')+'</div></div>';}).join(''); conversationList.querySelectorAll('.conversation-item').forEach(el=>el.addEventListener('click',()=>openConversation(el.dataset.userId)));}
+    async function loadConversations(preferredUserId){const data=await api('/api/admin/conversations'); conversations=data.conversations || []; if(!currentUserId && conversations.length) currentUserId = preferredUserId || conversations[0].id; renderConversationList(); if(currentUserId) await openConversation(currentUserId);}
+    function renderThread(data){if(!data || !data.user){threadTitle.textContent='Conversation not found'; threadMeta.textContent='Select another user.'; threadMessages.innerHTML='<div class=\"thread-empty\">Conversation not found.</div>'; return;} threadTitle.textContent=data.user.name+' — '+data.user.email; threadMeta.textContent='User dashboard + email thread'; if(!data.messages || !data.messages.length){threadMessages.innerHTML='<div class=\"thread-empty\">No messages yet for this user.</div>'; return;} threadMessages.innerHTML=data.messages.map(m=>'<div class=\"msg '+escapeHtml(m.sender)+'\"><div>'+escapeHtml(m.text)+'</div><div class=\"msg-time\">'+escapeHtml(formatTime(m.created_at))+'</div></div>').join(''); threadMessages.scrollTop=threadMessages.scrollHeight;}
+    async function openConversation(userId){currentUserId=userId; renderConversationList(); const data=await api('/api/admin/messages?user_id='+encodeURIComponent(userId)); renderThread(data);}
+    replyForm.addEventListener('submit', async (e)=>{e.preventDefault(); const text=(replyInput.value || '').trim(); if(!currentUserId || !text) return; replyStatus.className='reply-status'; replyStatus.textContent='Sending…'; try{await api('/api/admin/reply', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:currentUserId, text})}); replyInput.value=''; replyStatus.className='reply-status success'; replyStatus.textContent='Reply sent.'; await loadConversations(currentUserId);}catch(err){replyStatus.className='reply-status error'; replyStatus.textContent=err && err.message ? err.message : 'Failed to send reply.';}});
+    refreshBtn.addEventListener('click', async ()=>{replyStatus.className='reply-status'; replyStatus.textContent=''; await loadEmailStatus(); await loadConversations(currentUserId);});
+    (async()=>{await loadEmailStatus(); await loadConversations();})().catch(err=>{if(err && err.message==='admin_auth_required'){conversationList.innerHTML='<div class=\"thread-empty\">Log in with alex.pavsky@gmail.com to access this inbox.</div>'; threadMessages.innerHTML='<div class=\"thread-empty\">Admin access required. Sign in on the main site, then reopen this page.</div>'; return;} conversationList.innerHTML='<div class=\"thread-empty\">Failed to load inbox.</div>'; threadMessages.innerHTML='<div class=\"thread-empty\">'+escapeHtml(err && err.message ? err.message : 'Unknown error')+'</div>';});
+  </script>
+</body>
+</html>""")
+            return
+        if path == "/api/admin/email-status":
+            if not self._get_admin_user():
+                self._json(403, {"error": "admin_auth_required"})
+                return
+            cfg = _mail_transport_config()
+            self._json(200, {"ready": _mail_transport_ready(), "from": cfg["from_email"], "admin": cfg["admin_email"]})
+            return
+        if path == "/api/admin/conversations":
+            if not self._get_admin_user():
+                self._json(403, {"error": "admin_auth_required"})
+                return
+            self._json(200, {"conversations": _admin_conversations()})
+            return
+        if path == "/api/admin/messages":
+            if not self._get_admin_user():
+                self._json(403, {"error": "admin_auth_required"})
+                return
+            user_id = (parse_qs(parsed.query).get("user_id") or [""])[0].strip()
+            convo = _admin_messages_for_user(user_id)
+            if not convo:
+                self._json(404, {"error": "user_not_found"})
+                return
+            self._json(200, convo)
+            return
+        if path == "/api/auth/me":
             user = _get_user_by_token(self._get_token())
             if not user:
                 self._json(401, {"error": "not_authenticated"})
                 return
-            self._json(200, {"id": user["id"], "name": user["name"], "email": user["email"]})
+            self._json(200, _public_user_payload(user))
             return
-        if self.path == "/api/forum/posts":
+        if path == "/api/user/messages":
+            user = _get_user_by_token(self._get_token())
+            if not user:
+                self._json(401, {"error": "not_authenticated"})
+                return
+            conn = _db()
+            rows = conn.execute(
+                "SELECT id, sender, text, created_at FROM messages WHERE user_id = ? ORDER BY created_at ASC",
+                (user["id"],),
+            ).fetchall()
+            conn.close()
+            self._json(200, {"messages": [dict(row) for row in rows]})
+            return
+        if path == "/api/forum/posts":
             conn = _db()
             rows = conn.execute("SELECT id, user_id, user_name, text, created_at FROM forum_posts ORDER BY created_at DESC LIMIT 50").fetchall()
             conn.close()
@@ -506,14 +1808,38 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if self.path == "/api/maintenance-login":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+                key = body.get("key", "").strip()
+                if key == MAINTENANCE_KEY:
+                    cookie_on = self._maintenance_cookie(MAINTENANCE_KEY, 2592000)
+                    self._send_json_with_cookie(200, {"success": True}, cookie_on)
+                else:
+                    self._json(401, {"error": "Invalid key"})
+            except Exception:
+                self._json(400, {"error": "invalid json"})
+            return
+
+        if _is_maintenance() and not self._check_maintenance_bypass():
+            self._json(503, {"error": "maintenance", "message": "Site is under maintenance."})
+            return
+
         if self.path == "/api/subscribe":
             return self._handle_subscribe()
+        if self.path == "/api/newsletter/run-now":
+            return self._handle_newsletter_run_now()
         if self.path == "/api/auth/register":
             return self._handle_register()
         if self.path == "/api/auth/login":
             return self._handle_login()
         if self.path == "/api/auth/logout":
             return self._handle_logout()
+        if self.path == "/api/user/messages":
+            return self._handle_user_message()
+        if self.path == "/api/admin/reply":
+            return self._handle_admin_reply()
         if self.path == "/api/forum/posts":
             return self._handle_forum_post()
         if self.path == "/api/challenge":
@@ -614,10 +1940,23 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.commit()
                 conn.close()
             log.info("subscriber: %s ip=%s", email[:3] + '***', ip_hash[:8])
-            self._json(200, {"message": "You're subscribed! We'll send you the latest AI & QA news."})
+            message = "You're subscribed! Weekly AI & QA digest will use the latest site feed."
+            if not _newsletter_transport_ready():
+                message += " Email delivery is ready in code, but SMTP is not configured yet."
+            self._json(200, {"message": message, "weekly_digest": True, "transport_ready": _newsletter_transport_ready()})
         except Exception as e:
             log.warning("subscribe error: %s", e)
             self._json(500, {"error": "Server error. Please try again."})
+
+    def _handle_newsletter_run_now(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            body = {}
+        force = bool(body.get("force"))
+        result = _newsletter_run(run_type="manual", force=force)
+        status = 200 if result.get("ok") or result.get("status") in ("dry_run", "skipped") else 500
+        self._json(status, result)
 
 
     def _handle_register(self):
@@ -647,7 +1986,7 @@ class Handler(SimpleHTTPRequestHandler):
         conn.commit()
         conn.close()
         log.info("register: %s", email[:3] + "***")
-        self._json(200, {"token": token, "user": {"id": uid, "name": name, "email": email}})
+        self._json(200, {"token": token, "user": _public_user_payload({"id": uid, "name": name, "email": email})})
 
     def _handle_login(self):
         try:
@@ -659,17 +1998,20 @@ class Handler(SimpleHTTPRequestHandler):
         password = body.get("password") or ""
         conn = _db()
         row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if not row or row["password_hash"] != _hash_pw(password):
+        if not row or not _verify_pw(password, row["password_hash"]):
             conn.close()
             self._json(401, {"error": "Invalid email or password."})
             return
         user = dict(row)
+        # Migrate legacy SHA-256 hash to scrypt on successful login
+        if ":" not in row["password_hash"]:
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash_pw(password), user["id"]))
         token = uuid.uuid4().hex
         conn.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)", (token, user["id"], time.time()))
         conn.commit()
         conn.close()
         log.info("login: %s", email[:3] + "***")
-        self._json(200, {"token": token, "user": {"id": user["id"], "name": user["name"], "email": user["email"]}})
+        self._json(200, {"token": token, "user": _public_user_payload(user)})
 
     def _handle_logout(self):
         token = self._get_token()
@@ -679,6 +2021,77 @@ class Handler(SimpleHTTPRequestHandler):
             conn.commit()
             conn.close()
         self._json(200, {"ok": True})
+
+    def _handle_user_message(self):
+        user = _get_user_by_token(self._get_token())
+        if not user:
+            self._json(401, {"error": "not_authenticated"})
+            return
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        text = (body.get("text") or "").strip()
+        if not text:
+            self._json(400, {"error": "Message text required."})
+            return
+        mid = uuid.uuid4().hex
+        admin_mid = uuid.uuid4().hex
+        now = time.time()
+        admin_text = "Thanks. Your message was sent to Alex. You'll get a personal reply here and by email."
+        conn = _db()
+        conn.execute(
+            "INSERT INTO messages (id, user_id, sender, text, created_at) VALUES (?, ?, 'user', ?, ?)",
+            (mid, user["id"], text, now),
+        )
+        conn.execute(
+            "INSERT INTO messages (id, user_id, sender, text, created_at) VALUES (?, ?, 'admin', ?, ?)",
+            (admin_mid, user["id"], admin_text, now + 0.001),
+        )
+        conn.commit()
+        conn.close()
+        if _mail_transport_ready():
+            _send_async(_send_admin_notification, user["name"], user["email"], text)
+        self._json(200, {
+            "message": {"id": mid, "sender": "user", "text": text, "created_at": now},
+            "email_ready": _mail_transport_ready(),
+        })
+
+    def _handle_admin_reply(self):
+        admin = self._get_admin_user()
+        if not admin:
+            self._json(403, {"error": "admin_auth_required"})
+            return
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        user_id = (body.get("user_id") or "").strip()
+        text = (body.get("text") or "").strip()
+        if not user_id or not text:
+            self._json(400, {"error": "user_id_and_text_required"})
+            return
+        convo = _admin_messages_for_user(user_id)
+        if not convo:
+            self._json(404, {"error": "user_not_found"})
+            return
+        mid = uuid.uuid4().hex
+        now = time.time()
+        conn = _db()
+        conn.execute(
+            "INSERT INTO messages (id, user_id, sender, text, created_at) VALUES (?, ?, 'admin', ?, ?)",
+            (mid, user_id, text, now),
+        )
+        conn.commit()
+        conn.close()
+        if _mail_transport_ready():
+            _send_async(_send_user_reply_email, convo["user"]["name"], convo["user"]["email"], text)
+        self._json(200, {
+            "message": {"id": mid, "sender": "admin", "text": text, "created_at": now},
+            "email_ready": _mail_transport_ready(),
+        })
 
     def _handle_forum_post(self):
         user = _get_user_by_token(self._get_token())
@@ -877,13 +2290,35 @@ class Handler(SimpleHTTPRequestHandler):
         })
 
 
-def main():
+def _warmup_caches():
+    """Pre-fetch feed and YouTube caches on startup so first request is instant."""
+    try:
+        log.info("Warming up feed cache...")
+        _feed_cached_articles()
+        log.info("Feed cache ready: %d articles", len(_feed_cache["articles"]))
+    except Exception as e:
+        log.warning("Feed warmup failed: %s", e)
+    try:
+        log.info("Warming up YouTube cache...")
+        _youtube_cached_videos()
+        log.info("YouTube cache ready")
+    except Exception as e:
+        log.warning("YouTube warmup failed: %s", e)
 
+
+def main():
+    threading = __import__("threading")
+    scheduler = threading.Thread(target=_newsletter_scheduler_loop, name="newsletter-scheduler", daemon=True)
+    scheduler.start()
+    # Warm up caches in background thread so server starts immediately
+    warmup = threading.Thread(target=_warmup_caches, name="cache-warmup", daemon=True)
+    warmup.start()
     port = int(os.environ.get("CHAT_PORT", "8000"))
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     log.info("Chat server on port %d with %d models", port, len(CHAT_MODELS))
     for p, k in PROVIDER_KEY_ENV.items():
         log.info("  %s: %s", p, "OK" if os.environ.get(k) else "MISSING")
+    log.info("  newsletter smtp: %s", "OK" if _newsletter_transport_ready() else "MISSING")
     server.serve_forever()
 
 
