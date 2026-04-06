@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("chat")
 
 # Store DB outside web root for security
+os.chdir(Path(__file__).resolve().parent)
 _data_dir = Path(os.environ.get("DATA_DIR", str(Path.home() / "alexpavsky-data")))
 _data_dir.mkdir(parents=True, exist_ok=True)
 DB_PATH = _data_dir / "chat.db"
