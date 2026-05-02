@@ -1380,9 +1380,14 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        if qs.get("access_key", [None])[0] == MAINTENANCE_KEY:
+            cookie_on = self._maintenance_cookie(MAINTENANCE_KEY, 2592000)
+            self._redirect_with_cookie(path, cookie_on)
+            return
 
         if path == "/api/maintenance-ui":
-            qs = parse_qs(parsed.query)
             key = qs.get("key", [None])[0]
             cookie_on = self._maintenance_cookie(MAINTENANCE_KEY, 2592000)
             has_bypass = self._check_maintenance_bypass()
