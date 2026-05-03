@@ -290,7 +290,7 @@ PROVIDER_KEY_ENV = {
     "gemini": "GEMINI_API_KEY",
 }
 
-CHAT_MODELS = [
+_STATIC_MODELS = [
     {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "S"},
     {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
     {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
@@ -318,13 +318,95 @@ CHAT_MODELS = [
     {"id": "groq/compound-mini", "label": "Compound Mini", "provider": "groq", "search": True, "tier": "M"},
 ]
 
-MODEL_BY_ID = {m["id"]: m for m in CHAT_MODELS}
-VISION_MODEL_IDS = {m["id"] for m in CHAT_MODELS if m.get("vision")}
-TIER_S = [m for m in CHAT_MODELS if m["tier"] == "S"]
-TIER_M = [m for m in CHAT_MODELS if m["tier"] == "M"]
-TIER_H = [m for m in CHAT_MODELS if m["tier"] == "H"]
-CODING_MODELS = [m for m in CHAT_MODELS if m.get("coding")]
-SEARCH_MODELS = [m for m in CHAT_MODELS if m.get("search")]
+# Dynamic lists (will be overwritten by _update_global_models)
+CHAT_MODELS = []
+MODEL_BY_ID = {}
+VISION_MODEL_IDS = set()
+TIER_S = []
+TIER_M = []
+TIER_H = []
+CODING_MODELS = []
+SEARCH_MODELS = []
+
+import threading
+_model_lock = threading.Lock()
+
+def _update_global_models(new_models):
+    global CHAT_MODELS, MODEL_BY_ID, VISION_MODEL_IDS
+    global TIER_S, TIER_M, TIER_H, CODING_MODELS, SEARCH_MODELS
+
+    with _model_lock:
+        CHAT_MODELS = new_models
+        MODEL_BY_ID = {m["id"]: m for m in CHAT_MODELS}
+        VISION_MODEL_IDS = {m["id"] for m in CHAT_MODELS if m.get("vision")}
+        TIER_S = [m for m in CHAT_MODELS if m["tier"] == "S"]
+        TIER_M = [m for m in CHAT_MODELS if m["tier"] == "M"]
+        TIER_H = [m for m in CHAT_MODELS if m["tier"] == "H"]
+        CODING_MODELS = [m for m in CHAT_MODELS if m.get("coding")]
+        SEARCH_MODELS = [m for m in CHAT_MODELS if m.get("search")]
+
+_update_global_models(_STATIC_MODELS.copy())
+
+def _sync_openrouter_models():
+    """Fetch free models from OpenRouter, categorize them, and update global lists."""
+    try:
+        import urllib.request
+        import json
+        req = urllib.request.Request("https://openrouter.ai/api/v1/models")
+        with urllib.request.urlopen(req, timeout=15) as res:
+            data = json.loads(res.read().decode())
+        
+        dynamic_models = []
+        for m in data.get("data", []):
+            pricing = m.get("pricing", {})
+            if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
+                m_id = m.get("id", "")
+                m_name = m.get("name", "")
+                lower_id = m_id.lower()
+                lower_name = m_name.lower()
+                
+                # Exclude specific junk/test models if needed
+                if "test" in lower_id or "experimental" in lower_id:
+                    continue
+                
+                model_obj = {
+                    "id": m_id,
+                    "label": m_name,
+                    "provider": "openrouter",
+                    "free": True
+                }
+                
+                # Heuristics for capabilities
+                if "vision" in lower_id or "vision" in lower_name:
+                    model_obj["vision"] = True
+                if "coder" in lower_id or "code" in lower_id or "coder" in lower_name:
+                    model_obj["coding"] = True
+                if "r1" in lower_id or "reason" in lower_id or "think" in lower_id:
+                    model_obj["reasoning"] = True
+                
+                # Heuristics for tiers
+                ctx_len = int(m.get("context_length", 0))
+                if ctx_len >= 64000 or "70b" in lower_id or "405b" in lower_id or "r1" in lower_id:
+                    model_obj["tier"] = "H"
+                elif ctx_len >= 16000 or "27b" in lower_id or "32b" in lower_id:
+                    model_obj["tier"] = "M"
+                else:
+                    model_obj["tier"] = "S"
+                    
+                dynamic_models.append(model_obj)
+        
+        # Merge with static models
+        merged = _STATIC_MODELS.copy()
+        static_ids = {sm["id"] for sm in merged}
+        
+        for dm in dynamic_models:
+            if dm["id"] not in static_ids:
+                merged.append(dm)
+                
+        _update_global_models(merged)
+        log.info("Synced %d openrouter models (Total: %d)", len(dynamic_models), len(merged))
+    except Exception as e:
+        log.error("Failed to sync OpenRouter models: %s", e)
 
 MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 12000
@@ -860,6 +942,16 @@ def _newsletter_scheduler_loop():
         except Exception as exc:
             log.warning("newsletter scheduler error: %s", exc)
         time.sleep(max(60, interval))
+
+def _model_sync_loop():
+    """Sync OpenRouter models every 7 days."""
+    while True:
+        # Sleep for 7 days (7 * 24 * 60 * 60 seconds)
+        time.sleep(604800)
+        try:
+            _sync_openrouter_models()
+        except Exception as exc:
+            log.warning("model sync scheduler error: %s", exc)
 
 
 _feed_cache = {"fetched_at": 0.0, "articles": []}
@@ -2622,7 +2714,7 @@ CRITICAL RULES:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
-        if length > 131072:
+        if length > 262144:
             self._json(413, {"error": "payload_too_large"})
             return
         try:
@@ -2636,7 +2728,7 @@ CRITICAL RULES:
             self._json(429, {"error": "rate_limit", "message": "Too many requests. Try again in an hour."})
             return
 
-        context = _clean(body.get("context"), 8000) or "(no source context provided)"
+        context = _clean(body.get("context"), 80000) or "(no source context provided)"
         prompt = _clean(body.get("prompt"), 2000) or "(no prompt provided)"
         answer = _clean(body.get("answer"), 6000)
 
@@ -2731,6 +2823,11 @@ CRITICAL RULES:
 def _warmup_caches():
     """Pre-fetch feed and YouTube caches on startup so first request is instant."""
     try:
+        log.info("Warming up OpenRouter models...")
+        _sync_openrouter_models()
+    except Exception as e:
+        log.warning("OpenRouter warmup failed: %s", e)
+    try:
         log.info("Warming up feed cache...")
         _feed_cached_articles()
         log.info("Feed cache ready: %d articles", len(_feed_cache["articles"]))
@@ -2748,6 +2845,8 @@ def main():
     threading = __import__("threading")
     scheduler = threading.Thread(target=_newsletter_scheduler_loop, name="newsletter-scheduler", daemon=True)
     scheduler.start()
+    model_sync = threading.Thread(target=_model_sync_loop, name="model-sync-scheduler", daemon=True)
+    model_sync.start()
     # Warm up caches in background thread so server starts immediately
     warmup = threading.Thread(target=_warmup_caches, name="cache-warmup", daemon=True)
     warmup.start()

@@ -1380,27 +1380,113 @@
     function openModal(modal) { if (modal) modal.classList.add('active'); }
     function closeModal(modal) { if (modal) modal.classList.remove('active'); }
 
+    var HALLUCINATION_MAX_CHARS = 80000;
+    var HALLUCINATION_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
     (function initHallucinationTester() {
         var modal = document.getElementById('hallucination-modal');
         var openBtn = document.getElementById('open-hallucination-btn');
         var closeBtn = document.getElementById('hallucination-modal-close');
         var runBtn = document.getElementById('hallucination-run-btn');
         var clearBtn = document.getElementById('hallucination-clear-btn');
+        var uploadBtn = document.getElementById('hallucination-upload-btn');
+        var fileInput = document.getElementById('hallucination-file-input');
+        var fileInfo = document.getElementById('hallucination-file-info');
         var contextInput = document.getElementById('hallucination-context');
         var promptInput = document.getElementById('hallucination-prompt');
         var answerInput = document.getElementById('hallucination-answer');
         var output = document.getElementById('hallucination-output');
         if (!modal) return;
 
+        var charCount = document.getElementById('hallucination-char-count');
+
+        function updateCharCount() {
+            if (!charCount || !contextInput) return;
+            var len = (contextInput.value || '').length;
+            var pct = len / HALLUCINATION_MAX_CHARS;
+            charCount.textContent = len.toLocaleString() + ' / 80,000 characters';
+            charCount.className = 'hallucination-char-count' + (pct >= 1 ? ' hcc-over' : pct >= 0.85 ? ' hcc-warn' : '');
+        }
+
+        if (contextInput) contextInput.addEventListener('input', updateCharCount);
+
         if (openBtn) openBtn.addEventListener('click', function () { openModal(modal); });
         if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); });
         if (modal) modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); });
+
+        if (uploadBtn && fileInput) {
+            uploadBtn.addEventListener('click', function () { fileInput.click(); });
+            fileInput.addEventListener('change', function () {
+                var file = fileInput.files[0];
+                if (!file) return;
+                fileInput.value = '';
+                if (file.size > HALLUCINATION_MAX_FILE_BYTES) {
+                    setFileInfo('error', '\u26a0\ufe0f File too large (' + (file.size / 1048576).toFixed(1) + ' MB). Max 5 MB.');
+                    return;
+                }
+                var ext = file.name.split('.').pop().toLowerCase();
+                setFileInfo('loading', '<span class="hfi-spinner"></span> Reading ' + escapeHtml(file.name) + '\u2026');
+                if (ext === 'txt' || ext === 'md') {
+                    var reader = new FileReader();
+                    reader.onload = function (e) { applyExtractedText(e.target.result, file.name); };
+                    reader.onerror = function () { setFileInfo('error', '\u26a0\ufe0f Could not read file.'); };
+                    reader.readAsText(file);
+                } else if (ext === 'pdf') {
+                    extractPdf(file);
+                } else if (ext === 'docx') {
+                    extractDocx(file);
+                } else {
+                    setFileInfo('error', '\u26a0\ufe0f Unsupported format. Use TXT, MD, PDF or DOCX.');
+                }
+            });
+        }
+
+        function setFileInfo(type, html) {
+            if (!fileInfo) return;
+            fileInfo.className = 'hallucination-file-info hfi-' + type;
+            fileInfo.innerHTML = html;
+        }
+
+        async function extractPdf(file) {
+            try {
+                var pdfjsLib = window.pdfjsLib;
+                if (!pdfjsLib) { setFileInfo('error', '\u26a0\ufe0f PDF.js not loaded yet. Try again.'); return; }
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                var arrayBuffer = await file.arrayBuffer();
+                var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                var maxPages = Math.min(pdf.numPages, 50);
+                var pages = [];
+                for (var i = 1; i <= maxPages; i++) {
+                    var page = await pdf.getPage(i);
+                    var content = await page.getTextContent();
+                    pages.push(content.items.map(function (s) { return s.str; }).join(' '));
+                }
+                var text = pages.join('\n\n');
+                var pageNote = pdf.numPages > 50 ? ' (first 50 of ' + pdf.numPages + ' pages)' : '';
+                applyExtractedText(text, file.name + pageNote);
+            } catch (e) {
+                setFileInfo('error', '\u26a0\ufe0f PDF extraction failed: ' + escapeHtml(String(e.message || e)));
+            }
+        }
+
+        async function extractDocx(file) {
+            try {
+                if (!window.mammoth) { setFileInfo('error', '\u26a0\ufe0f mammoth.js not loaded yet. Try again.'); return; }
+                var arrayBuffer = await file.arrayBuffer();
+                var result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+                applyExtractedText(result.value, file.name);
+            } catch (e) {
+                setFileInfo('error', '\u26a0\ufe0f DOCX extraction failed: ' + escapeHtml(String(e.message || e)));
+            }
+        }
 
         if (clearBtn) clearBtn.addEventListener('click', function () {
             contextInput.value = '';
             promptInput.value = '';
             answerInput.value = '';
             output.innerHTML = '';
+            if (fileInfo) { fileInfo.innerHTML = ''; fileInfo.className = 'hallucination-file-info'; }
+            updateCharCount();
         });
 
         if (runBtn) runBtn.addEventListener('click', async function () {

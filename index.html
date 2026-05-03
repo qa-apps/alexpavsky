@@ -587,8 +587,15 @@
             <div class="modal-body">
                 <div class="hallucination-form">
                     <div class="hallucination-field">
-                        <label class="hallucination-label"><i class="fas fa-file-lines" style="color:#10b981"></i> Source Context <span class="hallucination-hint">(ground truth — paste your document, RAG chunk, policy or knowledge base text)</span></label>
-                        <textarea id="hallucination-context" class="code-input hallucination-textarea" placeholder="Paste the source text your AI should base its answer on..."></textarea>
+                        <div class="hallucination-label-row">
+                            <label class="hallucination-label"><i class="fas fa-file-lines" style="color:#10b981"></i> Source Context <span class="hallucination-hint">(ground truth — paste your document, RAG chunk, policy or knowledge base text)</span></label>
+                            <button class="btn btn-glass btn-xs" id="hallucination-upload-btn" title="TXT, MD, PDF (50 pages), DOCX — max 5 MB"><i class="fas fa-upload"></i> Upload File <span class="hfi-limit-hint">TXT · MD · PDF · DOCX · max 5 MB</span></button>
+                        </div>
+                        <textarea id="hallucination-context" class="code-input hallucination-textarea" placeholder="Paste the source text your AI should base its answer on… or upload a file (TXT, MD, PDF, DOCX — max 5 MB · PDF up to 50 pages)"></textarea>
+                        <div class="hallucination-context-footer">
+                            <div class="hallucination-file-info" id="hallucination-file-info"></div>
+                            <div class="hallucination-char-count" id="hallucination-char-count">0 / 80,000 characters</div>
+                        </div>
                     </div>
                     <div class="hallucination-field">
                         <label class="hallucination-label"><i class="fas fa-comment-dots" style="color:#6366f1"></i> User Prompt <span class="hallucination-hint">(what was asked)</span></label>
@@ -831,6 +838,9 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260503-0453"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
+    <input type="file" id="hallucination-file-input" accept=".txt,.md,.pdf,.docx" style="display:none">
+    <script src="script.js?v=20260503-0456"></script>
 </body>
 </html>
