@@ -1016,12 +1016,15 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     background: rgba(255,68,68,0.08);
 }
 .yt-carousel-track {
-    overflow: hidden;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     position: relative;
     padding: 0 1.75rem;
     border-radius: var(--radius-lg);
     scroll-behavior: smooth;
 }
+.yt-carousel-track::-webkit-scrollbar { display: none; }
 .yt-carousel-content {
     display: flex;
     gap: 1.15rem;
@@ -3135,4 +3138,151 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (min-width: 901px) {
     .hero { display: flex; gap: 4rem; }
+}
+
+/* ─── RAG Hallucination Tester ─── */
+.hallucination-form { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem; }
+
+.hallucination-field { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.hallucination-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.hallucination-hint {
+    font-weight: 400;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+}
+
+.hallucination-textarea { height: 120px; resize: vertical; }
+.hallucination-textarea-sm { height: 70px; }
+
+.hallucination-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2.5rem;
+    color: var(--text-dim);
+    gap: 0.75rem;
+}
+
+.hallucination-error {
+    padding: 1rem 1.25rem;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 10px;
+    color: #f87171;
+    font-size: 0.88rem;
+}
+
+.hallucination-output { margin-top: 1rem; }
+
+.hallucination-report { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.hr-scores {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+.hr-score-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 1.1rem 1rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+}
+.hr-score-value {
+    font-size: 2.2rem;
+    font-weight: 800;
+    line-height: 1;
+}
+.hr-score-label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+.hr-score-badge {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.2rem;
+}
+.hr-score-stats { gap: 0; justify-content: center; }
+.hr-stats-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    padding: 0.2rem 0;
+}
+.hr-stats-row span { font-size: 1.4rem; font-weight: 700; }
+.hr-stats-row small { font-size: 0.7rem; color: var(--text-dim); }
+
+.hr-section { display: flex; flex-direction: column; gap: 0.6rem; }
+.hr-section-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.hf-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    margin-bottom: 0.35rem;
+}
+.hf-icon { font-size: 0.95rem; margin-top: 0.1rem; flex-shrink: 0; }
+.hf-supported { color: #10b981; }
+.hf-hallucinated { color: #ef4444; }
+.hf-contradicted { color: #f59e0b; }
+.hf-unknown { color: #94a3b8; }
+.hf-content { display: flex; flex-direction: column; gap: 0.2rem; }
+.hf-fact { font-size: 0.85rem; color: var(--text-primary); line-height: 1.4; }
+.hf-explanation { font-size: 0.76rem; color: var(--text-dim); line-height: 1.4; }
+
+.hf-patterns { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.hf-pattern-tag {
+    padding: 0.25rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.2);
+    color: #fca5a5;
+}
+
+.hf-recs {
+    margin: 0;
+    padding: 0 0 0 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.hf-recs li { font-size: 0.84rem; color: var(--text-secondary); line-height: 1.5; }
+
+@media (max-width: 640px) {
+    .hr-scores { grid-template-columns: 1fr 1fr; }
+    .hr-score-stats { display: none; }
 }
