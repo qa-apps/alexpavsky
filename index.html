@@ -352,11 +352,11 @@
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
-                    <div class="lab-icon"><i class="fas fa-right-left"></i></div>
-                    <h3>Diff Checker</h3>
-                    <p>Compare two texts side by side. Handy for API response diffs.</p>
-                    <button class="btn btn-glass btn-sm" id="open-diff-btn">
-                        <i class="fas fa-columns"></i> Open Tool
+                    <div class="lab-icon" style="color:#f59e0b"><i class="fas fa-bug"></i></div>
+                    <h3>Prompt Injection Test</h3>
+                    <p>Scan prompts and AI outputs for hidden Unicode, invisible characters, and injection patterns.</p>
+                    <button class="btn btn-glass btn-sm" id="open-pitest-btn">
+                        <i class="fas fa-shield-virus"></i> Scan Prompt
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
@@ -540,23 +540,22 @@
         </div>
     </div>
 
-    <div class="diff-modal" id="diff-modal">
+    <!-- Prompt Injection Inspector -->
+    <div class="diff-modal" id="pitest-modal">
         <div class="modal-overlay"></div>
         <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h3><i class="fas fa-columns"></i> Diff Checker</h3>
-                <button class="modal-close" id="diff-modal-close"><i class="fas fa-times"></i></button>
+                <h3><i class="fas fa-shield-virus" style="color:#f59e0b"></i> Prompt Injection Inspector</h3>
+                <button class="modal-close" id="pitest-modal-close"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
-                <div class="diff-inputs">
-                    <textarea id="diff-left" class="code-input" placeholder="Original text..."></textarea>
-                    <textarea id="diff-right" class="code-input" placeholder="Modified text..."></textarea>
-                </div>
+                <textarea id="pitest-input" class="code-input" placeholder="Paste your prompt, system prompt, AI output, or any text to scan for hidden injections, invisible Unicode, and attack patterns..."></textarea>
                 <div class="modal-actions">
-                    <button class="btn btn-primary btn-sm" id="diff-compare-btn">Compare</button>
-                    <button class="btn btn-glass btn-sm" id="diff-clear-btn">Clear</button>
+                    <button class="btn btn-primary btn-sm" id="pitest-scan-btn"><i class="fas fa-search"></i> Scan</button>
+                    <button class="btn btn-glass btn-sm" id="pitest-clear-btn"><i class="fas fa-trash"></i> Clear</button>
+                    <button class="btn btn-glass btn-sm" id="pitest-copy-btn"><i class="fas fa-copy"></i> Copy Report</button>
                 </div>
-                <div id="diff-output" class="diff-output"></div>
+                <div id="pitest-output" class="pitest-output"></div>
             </div>
         </div>
     </div>
@@ -761,6 +760,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260503-0207"></script>
+    <script src="script.js?v=20260503-0234"></script>
 </body>
 </html>

@@ -1300,49 +1300,245 @@
         });
     }
 
-    // ─── Diff Checker ───
-    var diffModal = document.getElementById('diff-modal');
-    var openDiffBtn = document.getElementById('open-diff-btn');
-    var diffModalClose = document.getElementById('diff-modal-close');
-    var diffCompareBtn = document.getElementById('diff-compare-btn');
-    var diffClearBtn = document.getElementById('diff-clear-btn');
-    var diffLeft = document.getElementById('diff-left');
-    var diffRight = document.getElementById('diff-right');
-    var diffOutput = document.getElementById('diff-output');
+    // ─── Prompt Injection Inspector ───
+    (function initPromptInjectionTest() {
+        var modal     = document.getElementById('pitest-modal');
+        var openBtn   = document.getElementById('open-pitest-btn');
+        var closeBtn  = document.getElementById('pitest-modal-close');
+        var scanBtn   = document.getElementById('pitest-scan-btn');
+        var clearBtn  = document.getElementById('pitest-clear-btn');
+        var copyBtn   = document.getElementById('pitest-copy-btn');
+        var input     = document.getElementById('pitest-input');
+        var output    = document.getElementById('pitest-output');
+        if (!modal || !openBtn) return;
 
-    if (openDiffBtn) openDiffBtn.addEventListener('click', function () { openModal(diffModal); });
-    if (diffModalClose) diffModalClose.addEventListener('click', function () { closeModal(diffModal); });
-    if (diffModal) {
-        diffModal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(diffModal); });
-    }
+        if (openBtn)  openBtn.addEventListener('click', function () { openModal(modal); });
+        if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); });
+        modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); });
 
-    if (diffCompareBtn && diffLeft && diffRight && diffOutput) {
-        diffCompareBtn.addEventListener('click', function () {
-            var leftLines = diffLeft.value.split('\n');
-            var rightLines = diffRight.value.split('\n');
-            var maxLen = Math.max(leftLines.length, rightLines.length);
-            var html = '';
-            for (var i = 0; i < maxLen; i++) {
-                var l = leftLines[i] || '';
-                var r = rightLines[i] || '';
-                if (l === r) {
-                    html += '<div class="diff-line">&nbsp; ' + escapeHtml(l) + '</div>';
-                } else {
-                    if (l) html += '<div class="diff-line diff-remove">- ' + escapeHtml(l) + '</div>';
-                    if (r) html += '<div class="diff-line diff-add">+ ' + escapeHtml(r) + '</div>';
+        // ── Detection patterns ──────────────────────────────────────────────
+
+        // Hidden / invisible Unicode code points
+        var INVISIBLE_CHARS = [
+            { cp: 0x200B, name: 'Zero-Width Space',          risk: 'high' },
+            { cp: 0x200C, name: 'Zero-Width Non-Joiner',     risk: 'high' },
+            { cp: 0x200D, name: 'Zero-Width Joiner',         risk: 'high' },
+            { cp: 0x200E, name: 'Left-to-Right Mark',        risk: 'medium' },
+            { cp: 0x200F, name: 'Right-to-Left Mark',        risk: 'medium' },
+            { cp: 0x202A, name: 'LTR Embedding',             risk: 'high' },
+            { cp: 0x202B, name: 'RTL Embedding',             risk: 'high' },
+            { cp: 0x202C, name: 'Pop Directional Format',    risk: 'medium' },
+            { cp: 0x202D, name: 'LTR Override',              risk: 'high' },
+            { cp: 0x202E, name: 'RTL Override (Trojan src)', risk: 'critical' },
+            { cp: 0x2060, name: 'Word Joiner',               risk: 'medium' },
+            { cp: 0x2061, name: 'Function Application',      risk: 'low' },
+            { cp: 0x2062, name: 'Invisible Times',           risk: 'low' },
+            { cp: 0x2063, name: 'Invisible Separator',       risk: 'medium' },
+            { cp: 0x2064, name: 'Invisible Plus',            risk: 'low' },
+            { cp: 0xFEFF, name: 'BOM / Zero-Width No-Break', risk: 'medium' },
+            { cp: 0x00AD, name: 'Soft Hyphen',               risk: 'low' },
+            { cp: 0x034F, name: 'Combining Grapheme Joiner', risk: 'medium' },
+            { cp: 0x115F, name: 'Hangul Choseong Filler',    risk: 'medium' },
+            { cp: 0x1160, name: 'Hangul Jungseong Filler',   risk: 'medium' },
+            { cp: 0x3164, name: 'Hangul Filler',             risk: 'medium' },
+            { cp: 0xFFA0, name: 'Halfwidth Hangul Filler',   risk: 'medium' },
+        ];
+
+        // Prompt injection text patterns
+        var INJECTION_PATTERNS = [
+            { re: /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|guidelines?)/i, label: 'Ignore previous instructions', risk: 'critical' },
+            { re: /disregard\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)/i,                  label: 'Disregard instructions',      risk: 'critical' },
+            { re: /forget\s+(everything|all|your|previous|prior)/i,                                                    label: 'Forget previous context',     risk: 'high' },
+            { re: /you\s+are\s+now\s+(a|an|the)\s+/i,                                                                  label: 'Role reassignment attempt',   risk: 'high' },
+            { re: /your\s+(new\s+)?(role|persona|identity|instructions?)\s+(is|are)/i,                                 label: 'New role/persona injection',  risk: 'high' },
+            { re: /act\s+as\s+(if\s+you\s+are|a|an)\s+/i,                                                             label: 'Act-as persona jailbreak',    risk: 'high' },
+            { re: /\[SYSTEM\]|\<\|system\|\>|<<SYS>>|###\s*System:/i,                                                 label: 'Fake system prompt tag',      risk: 'critical' },
+            { re: /\bDAN\b|\bJailbreak\b|\bjailbroken\b/i,                                                            label: 'DAN / Jailbreak keyword',     risk: 'high' },
+            { re: /repeat\s+(the\s+)?(above|following|everything|all|this)\s+(back|text|word)/i,                       label: 'Data extraction via repeat',  risk: 'high' },
+            { re: /print\s+(your\s+)?(system\s+prompt|instructions?|prompt|config)/i,                                  label: 'Prompt leak attempt',         risk: 'critical' },
+            { re: /reveal\s+(your\s+)?(system\s+prompt|instructions?|rules?|training)/i,                               label: 'Training data extraction',    risk: 'critical' },
+            { re: /translate\s+(this|the\s+above|everything)\s+to/i,                                                   label: 'Translation exfiltration',    risk: 'medium' },
+            { re: /\bbase64\b.*\bdecode\b|\bdecode\b.*\bbase64\b/i,                                                    label: 'Base64 decode instruction',   risk: 'high' },
+            { re: /<!--[\s\S]*?-->/,                                                                                    label: 'HTML comment (hidden text)',  risk: 'medium' },
+            { re: /\bsudo\b|\broot\b.*\baccess\b|\badmin\b.*\bmode\b/i,                                                label: 'Privilege escalation phrase', risk: 'medium' },
+            { re: /\btoken\b.*\blimit\b|\bcontext\b.*\bwindow\b.*\boverflow\b/i,                                       label: 'Context overflow attempt',    risk: 'medium' },
+        ];
+
+        // Homoglyph / lookalike character ranges (Cyrillic, Greek, etc. that look like Latin)
+        function detectHomoglyphs(text) {
+            var hits = [];
+            var LATIN_LOOKALIKES = {
+                '\u0430': 'а→a (Cyrillic)', '\u0435': 'е→e (Cyrillic)', '\u043E': 'о→o (Cyrillic)',
+                '\u0440': 'р→p (Cyrillic)', '\u0441': 'с→c (Cyrillic)', '\u0445': 'х→x (Cyrillic)',
+                '\u0456': 'і→i (Cyrillic)', '\u04CF': 'ӏ→l (Cyrillic)', '\u0391': 'Α→A (Greek)',
+                '\u0395': 'Ε→E (Greek)',    '\u0397': 'Η→H (Greek)',    '\u0399': 'Ι→I (Greek)',
+                '\u039A': 'Κ→K (Greek)',    '\u039C': 'Μ→M (Greek)',    '\u039D': 'Ν→N (Greek)',
+                '\u039F': 'Ο→O (Greek)',    '\u03A1': 'Ρ→P (Greek)',    '\u03A4': 'Τ→T (Greek)',
+                '\u03A5': 'Υ→Y (Greek)',    '\u03A7': 'Χ→X (Greek)',
+            };
+            for (var i = 0; i < text.length; i++) {
+                var ch = text[i];
+                if (LATIN_LOOKALIKES[ch]) hits.push({ ch: ch, info: LATIN_LOOKALIKES[ch], pos: i });
+            }
+            return hits;
+        }
+
+        // ── Render helpers ──────────────────────────────────────────────────
+        function escH(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+        function badge(risk) {
+            var map = { critical:'#ef4444', high:'#f97316', medium:'#f59e0b', low:'#06b6d4' };
+            return '<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:0.68rem;font-weight:700;background:' +
+                   (map[risk]||'#888') + '22;color:' + (map[risk]||'#888') + ';border:1px solid ' + (map[risk]||'#888') + '44">' +
+                   risk.toUpperCase() + '</span>';
+        }
+        function section(colorClass, icon, title, items) {
+            if (!items.length) return '';
+            var html = '<div class="pitest-section">' +
+                '<div class="pitest-section-header ' + colorClass + '"><i class="' + icon + '"></i>&nbsp;' + escH(title) + ' (' + items.length + ')</div>';
+            items.forEach(function(it) {
+                html += '<div class="pitest-item"><div class="pitest-item-label">' + it.label + '&nbsp;' + badge(it.risk) + '</div>' +
+                        (it.detail ? '<div class="pitest-item-detail">' + it.detail + '</div>' : '') + '</div>';
+            });
+            return html + '</div>';
+        }
+
+        // ── Main scan ───────────────────────────────────────────────────────
+        function scan() {
+            var text = input.value;
+            if (!text.trim()) {
+                output.innerHTML = '<div style="color:var(--text-dim);padding:1rem;text-align:center;">Paste a prompt or text above and click Scan.</div>';
+                return;
+            }
+
+            var invisibleFound = [];
+            INVISIBLE_CHARS.forEach(function(def) {
+                var ch = String.fromCodePoint(def.cp);
+                var count = (text.split(ch).length - 1);
+                if (count > 0) {
+                    invisibleFound.push({
+                        label: def.name + ' — U+' + def.cp.toString(16).toUpperCase().padStart(4,'0'),
+                        detail: 'Found ' + count + ' occurrence(s)',
+                        risk: def.risk
+                    });
+                }
+            });
+
+            var injectionFound = [];
+            INJECTION_PATTERNS.forEach(function(pat) {
+                var m = text.match(pat.re);
+                if (m) {
+                    injectionFound.push({
+                        label: pat.label,
+                        detail: 'Matched: "' + escH(m[0].substring(0, 80)) + '"',
+                        risk: pat.risk
+                    });
+                }
+            });
+
+            var homoglyphs = detectHomoglyphs(text);
+            var homoglyphFound = [];
+            var seen = {};
+            homoglyphs.forEach(function(h) {
+                if (!seen[h.ch]) {
+                    seen[h.ch] = true;
+                    homoglyphFound.push({ label: 'Homoglyph: ' + h.info, detail: 'At position ' + h.pos, risk: 'high' });
+                }
+            });
+
+            // Non-printable ASCII control chars (except \n \r \t)
+            var controlFound = [];
+            var controlRe = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+            var cm;
+            var controlSeen = {};
+            while ((cm = controlRe.exec(text)) !== null) {
+                var cp = cm[0].charCodeAt(0);
+                if (!controlSeen[cp]) {
+                    controlSeen[cp] = true;
+                    controlFound.push({ label: 'Control char U+' + cp.toString(16).toUpperCase().padStart(4,'0'), detail: 'Non-printable ASCII', risk: 'medium' });
                 }
             }
-            diffOutput.innerHTML = html || '<div class="diff-line">No differences found.</div>';
-        });
-    }
 
-    if (diffClearBtn && diffLeft && diffRight && diffOutput) {
-        diffClearBtn.addEventListener('click', function () {
-            diffLeft.value = '';
-            diffRight.value = '';
-            diffOutput.innerHTML = '';
+            // Overall risk score
+            var totalIssues = invisibleFound.length + injectionFound.length + homoglyphFound.length + controlFound.length;
+            var hasCritical  = [].concat(invisibleFound, injectionFound, homoglyphFound, controlFound).some(function(i){ return i.risk === 'critical'; });
+            var hasHigh      = [].concat(invisibleFound, injectionFound, homoglyphFound, controlFound).some(function(i){ return i.risk === 'high' || i.risk === 'critical'; });
+
+            var verdictClass, verdictIcon, verdictTitle, verdictSub;
+            if (totalIssues === 0) {
+                verdictClass = 'clean'; verdictIcon = '✅';
+                verdictTitle = 'No threats detected';
+                verdictSub = 'Text appears clean — no hidden Unicode, injection patterns, or homoglyphs found.';
+            } else if (hasCritical) {
+                verdictClass = 'danger'; verdictIcon = '🚨';
+                verdictTitle = 'CRITICAL — Prompt injection detected!';
+                verdictSub = totalIssues + ' issue(s) found. This text contains high-risk attack patterns.';
+            } else if (hasHigh) {
+                verdictClass = 'warn'; verdictIcon = '⚠️';
+                verdictTitle = 'WARNING — Suspicious content found';
+                verdictSub = totalIssues + ' issue(s) found. Review before passing to an LLM.';
+            } else {
+                verdictClass = 'warn'; verdictIcon = '🔍';
+                verdictTitle = 'Low-risk anomalies found';
+                verdictSub = totalIssues + ' issue(s) found. May be benign but worth reviewing.';
+            }
+
+            // Build highlighted preview
+            var previewText = text.substring(0, 500);
+            INVISIBLE_CHARS.forEach(function(def) {
+                var ch = String.fromCodePoint(def.cp);
+                var re = new RegExp(ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                previewText = previewText.replace(re, '<mark>[U+' + def.cp.toString(16).toUpperCase().padStart(4,'0') + ']</mark>');
+            });
+
+            var html = '';
+            html += '<div class="pitest-verdict ' + verdictClass + '">' +
+                    '<div class="pitest-verdict-icon">' + verdictIcon + '</div>' +
+                    '<div><div class="pitest-verdict-title">' + verdictTitle + '</div>' +
+                    '<div class="pitest-verdict-sub">' + verdictSub + '</div></div></div>';
+
+            if (totalIssues > 0) {
+                html += '<div class="pitest-text-preview">' + previewText + (text.length > 500 ? '\n<span style="color:var(--text-dim)">[truncated…]</span>' : '') + '</div>';
+            }
+
+            html += section('red',    'fas fa-syringe',      'Injection Patterns',      injectionFound);
+            html += section('red',    'fas fa-eye-slash',    'Hidden Unicode',           invisibleFound);
+            html += section('yellow', 'fas fa-font',         'Homoglyph Lookalikes',     homoglyphFound);
+            html += section('blue',   'fas fa-terminal',     'Control Characters',       controlFound);
+
+            // Stats line
+            html += '<div style="font-size:0.75rem;color:var(--text-dim);padding:0.25rem 0.25rem 0">' +
+                    'Scanned ' + text.length + ' chars &middot; ' +
+                    'Injection: ' + injectionFound.length + ' &middot; ' +
+                    'Hidden Unicode: ' + invisibleFound.length + ' &middot; ' +
+                    'Homoglyphs: ' + homoglyphFound.length + ' &middot; ' +
+                    'Control: ' + controlFound.length + '</div>';
+
+            output.innerHTML = html;
+            scanReport = { text: text, totalIssues: totalIssues, injection: injectionFound, invisible: invisibleFound, homoglyphs: homoglyphFound, control: controlFound };
+        }
+
+        var scanReport = null;
+
+        if (scanBtn) scanBtn.addEventListener('click', scan);
+        if (clearBtn) clearBtn.addEventListener('click', function () { input.value = ''; output.innerHTML = ''; scanReport = null; });
+        if (copyBtn) copyBtn.addEventListener('click', function () {
+            if (!scanReport) return;
+            var lines = ['=== Prompt Injection Inspector Report ===',
+                'Total Issues: ' + scanReport.totalIssues,
+                '',
+                '--- Injection Patterns (' + scanReport.injection.length + ') ---'];
+            scanReport.injection.forEach(function(i){ lines.push('  [' + i.risk.toUpperCase() + '] ' + i.label + (i.detail ? ' — ' + i.detail.replace(/<[^>]+>/g,'') : '')); });
+            lines.push('', '--- Hidden Unicode (' + scanReport.invisible.length + ') ---');
+            scanReport.invisible.forEach(function(i){ lines.push('  [' + i.risk.toUpperCase() + '] ' + i.label + ' — ' + i.detail); });
+            lines.push('', '--- Homoglyphs (' + scanReport.homoglyphs.length + ') ---');
+            scanReport.homoglyphs.forEach(function(i){ lines.push('  [' + i.risk.toUpperCase() + '] ' + i.label); });
+            navigator.clipboard.writeText(lines.join('\n'));
+            copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            setTimeout(function(){ copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy Report'; }, 2000);
         });
-    }
+    })();
 
     // ─── Chat Widget ───
     (function initChatWidget() {
