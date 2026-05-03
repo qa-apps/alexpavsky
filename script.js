@@ -2870,7 +2870,7 @@
             targetType: document.getElementById('attackgen-target').value,
             attackType: document.getElementById('attackgen-attacktype').value,
             severity: document.getElementById('attackgen-severity').value,
-            language: document.getElementById('attackgen-language').value,
+            language: 'en',
             systemDescription: document.getElementById('attackgen-system-desc').value,
         };
         attackgenRunBtn.disabled = true;
