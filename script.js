@@ -129,6 +129,9 @@
     let allArticles = [];
     let displayedCount = 0;
     const ARTICLES_PER_PAGE = 9;
+    const FEED_MANUAL_SCROLL_STEP = 360;
+    const FEED_AUTOSCROLL_PX_PER_FRAME = 0.3;
+    const FEED_RESUME_AFTER_INTERACTION_MS = 1800;
     const YT_MANUAL_SCROLL_STEP = 480;
     const YT_MOBILE_SCROLL_STEP = 300;
     const YT_AUTOSCROLL_PX_PER_FRAME = 0.35;
@@ -136,6 +139,7 @@
     const YT_HOLD_START_DELAY_MS = 120;
     const YT_RESUME_AFTER_INTERACTION_MS = 1800;
     let currentFilter = 'all';
+    let feedCarouselState = null;
     let ytCarouselState = null;
 
     function timeoutPromise(ms) {
@@ -658,6 +662,10 @@
         toShow.forEach(function (article) {
             grid.appendChild(renderArticle(article));
         });
+        toShow.forEach(function (article) {
+            grid.appendChild(renderArticle(article));
+        });
+        setupFeedCarouselMotion();
     }
 
     var FEED_STORAGE_KEY = 'alexpavsky_feed_cache';
@@ -1249,17 +1257,74 @@
         bindYoutubeArrowButton(rightBtn, 1);
     })();
 
+    function setupFeedCarouselMotion() {
+        var grid = document.getElementById('feed-grid');
+        if (!grid) return;
+        if (feedCarouselState && feedCarouselState.rafId) {
+            cancelAnimationFrame(feedCarouselState.rafId);
+        }
+        if (feedCarouselState && feedCarouselState.wrapTimer) {
+            clearTimeout(feedCarouselState.wrapTimer);
+        }
+        function getHalfWidth() {
+            return grid.scrollWidth / 2;
+        }
+        function normalizeScroll() {
+            var half = getHalfWidth();
+            if (!half) return;
+            if (grid.scrollLeft >= half) grid.scrollLeft -= half;
+            if (grid.scrollLeft < 0) grid.scrollLeft += half;
+        }
+        feedCarouselState = {
+            rafId: 0,
+            wrapTimer: 0,
+            pauseUntil: 0,
+            pause: function (ms) {
+                feedCarouselState.pauseUntil = Date.now() + ms;
+            },
+            manualScroll: function (dir) {
+                feedCarouselState.pause(FEED_RESUME_AFTER_INTERACTION_MS);
+                normalizeScroll();
+                grid.scrollBy({
+                    left: dir * FEED_MANUAL_SCROLL_STEP,
+                    behavior: 'smooth'
+                });
+                clearTimeout(feedCarouselState.wrapTimer);
+                feedCarouselState.wrapTimer = setTimeout(function () {
+                    normalizeScroll();
+                }, 700);
+            }
+        };
+        function tick() {
+            normalizeScroll();
+            if (Date.now() >= feedCarouselState.pauseUntil && !grid.matches(':hover')) {
+                grid.scrollLeft += FEED_AUTOSCROLL_PX_PER_FRAME;
+            }
+            feedCarouselState.rafId = requestAnimationFrame(tick);
+        }
+        grid.scrollLeft = 0;
+        tick();
+    }
+
+    function scrollFeedCarousel(dir) {
+        if (!feedCarouselState) {
+            setupFeedCarouselMotion();
+        }
+        if (feedCarouselState) {
+            feedCarouselState.manualScroll(dir);
+        }
+    }
+
     // Feed carousel arrows
     (function initFeedArrows() {
-        var grid = document.getElementById('feed-grid');
         var leftBtn = document.getElementById('feed-btn-left');
         var rightBtn = document.getElementById('feed-btn-right');
-        if (!grid || !leftBtn || !rightBtn) return;
+        if (!leftBtn || !rightBtn) return;
         leftBtn.addEventListener('click', function () {
-            grid.scrollBy({ left: -340, behavior: 'smooth' });
+            scrollFeedCarousel(-1);
         });
         rightBtn.addEventListener('click', function () {
-            grid.scrollBy({ left: 340, behavior: 'smooth' });
+            scrollFeedCarousel(1);
         });
     })();
 
