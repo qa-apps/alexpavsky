@@ -1089,13 +1089,28 @@
 
     if (jsonFormatBtn && jsonInput && jsonOutput) {
         jsonFormatBtn.addEventListener('click', function () {
+            var raw = jsonInput.value.trim();
+            if (!raw) {
+                jsonOutput.textContent = 'Paste some JSON above and click Format.';
+                jsonOutput.style.color = 'var(--text-dim)';
+                return;
+            }
+            // Auto-fix common issues: trailing commas, single quotes → double quotes
+            var fixed = raw
+                .replace(/,\s*([}\]])/g, '$1')                      // trailing commas
+                .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')          // unquoted keys
+                .replace(/:\s*'([^']*)'/g, ': "$1"');                // single-quoted values
             try {
-                var parsed = JSON.parse(jsonInput.value);
-                jsonOutput.textContent = JSON.stringify(parsed, null, 2);
-                jsonOutput.style.color = 'var(--success)';
+                var parsed = JSON.parse(fixed);
+                var pretty = JSON.stringify(parsed, null, 2);
+                jsonOutput.textContent = pretty;
+                jsonOutput.style.color = 'var(--success, #10b981)';
+                if (fixed !== raw) {
+                    jsonOutput.textContent = '/* ✓ Auto-fixed minor issues */\n' + pretty;
+                }
             } catch (e) {
-                jsonOutput.textContent = 'Error: ' + e.message;
-                jsonOutput.style.color = 'var(--danger)';
+                jsonOutput.textContent = '✗ ' + e.message + '\n\nMake sure your JSON is valid.\nExample: {"key": "value", "num": 42}';
+                jsonOutput.style.color = 'var(--danger, #ef4444)';
             }
         });
     }
