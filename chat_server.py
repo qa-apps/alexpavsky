@@ -990,7 +990,7 @@ def _yt_video_id(url: str) -> str:
 
 
 def _youtube_collect() -> list:
-    cutoff = _newsletter_now() - timedelta(days=14)
+    cutoff = _newsletter_now() - timedelta(days=90)
     results = []
     for src in YOUTUBE_SOURCES:
         try:
