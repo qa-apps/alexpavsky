@@ -2495,8 +2495,16 @@ CRITICAL RULES:
             user_input += f"TARGET_SYSTEM_DESCRIPTION: {system_desc}\n"
         user_input += "\nGenerate the adversarial prompt now. Output ONLY the JSON object."
 
-        # Use a strong reasoning model for quality. Try TIER_H first, fall back.
-        gen_model = _pick(TIER_H) or _pick(TIER_M) or CHAT_MODELS[0]
+        # Use a fast reliable model for generation to avoid Nginx 504 timeouts.
+        # DeepSeek R1 or large OpenRouter models can take >60s to stream JSON.
+        gen_model = None
+        for m_id in ["gemini-2.5-flash", "gemini-2.0-flash", "llama-3.3-70b-versatile"]:
+            if m_id in MODEL_BY_ID:
+                gen_model = MODEL_BY_ID[m_id]
+                break
+        if not gen_model:
+            gen_model = CHAT_MODELS[0]
+
         log.info("attack-gen: ind=%s att=%s sev=%s model=%s ip=%s",
                  industry, attack_type, severity, gen_model["label"], ip_hash[:8])
 
@@ -2504,7 +2512,7 @@ CRITICAL RULES:
             gen_model,
             self.ATTACK_GENERATOR_SYSTEM,
             user_input,
-            2048,
+            1024, # reduce tokens slightly to ensure faster completion
         )
 
         if not reply or not reply.strip():

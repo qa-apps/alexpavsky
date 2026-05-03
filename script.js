@@ -2900,19 +2900,27 @@
             });
     }
 
+    function resetAttackGen() {
+        attackgenOutput.innerHTML = '';
+        document.getElementById('attackgen-system-desc').value = '';
+        document.getElementById('attackgen-industry').selectedIndex = 0;
+        document.getElementById('attackgen-target').selectedIndex = 0;
+        document.getElementById('attackgen-attacktype').selectedIndex = 0;
+        document.getElementById('attackgen-severity').selectedIndex = 1; // Medium
+    }
+
     document.getElementById('open-attackgen-btn').addEventListener('click', function () {
         attackgenModal.classList.add('active');
     });
     document.getElementById('attackgen-modal-close').addEventListener('click', function () {
         attackgenModal.classList.remove('active');
+        resetAttackGen();
     });
     attackgenModal.querySelector('.modal-overlay').addEventListener('click', function () {
         attackgenModal.classList.remove('active');
+        resetAttackGen();
     });
     attackgenRunBtn.addEventListener('click', runAttackGenerator);
-    attackgenClearBtn.addEventListener('click', function () {
-        attackgenOutput.innerHTML = '';
-        document.getElementById('attackgen-system-desc').value = '';
-    });
+    attackgenClearBtn.addEventListener('click', resetAttackGen);
 
 })();
