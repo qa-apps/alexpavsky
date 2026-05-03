@@ -14,11 +14,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
-from html import escape as html_escape
+from html import escape as html_escape, unescape as html_unescape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 try:
@@ -336,6 +336,9 @@ def _update_global_models(new_models):
     global TIER_S, TIER_M, TIER_H, CODING_MODELS, SEARCH_MODELS
 
     with _model_lock:
+        # Sort by 'created' timestamp descending (newest first)
+        new_models.sort(key=lambda m: m.get("created", 0), reverse=True)
+        
         CHAT_MODELS = new_models
         MODEL_BY_ID = {m["id"]: m for m in CHAT_MODELS}
         VISION_MODEL_IDS = {m["id"] for m in CHAT_MODELS if m.get("vision")}
@@ -364,6 +367,7 @@ def _sync_openrouter_models():
                 m_name = m.get("name", "")
                 lower_id = m_id.lower()
                 lower_name = m_name.lower()
+                created = int(m.get("created", 0))
                 
                 # Exclude specific junk/test models if needed
                 if "test" in lower_id or "experimental" in lower_id:
@@ -373,7 +377,8 @@ def _sync_openrouter_models():
                     "id": m_id,
                     "label": m_name,
                     "provider": "openrouter",
-                    "free": True
+                    "free": True,
+                    "created": created
                 }
                 
                 # Heuristics for capabilities
@@ -495,6 +500,69 @@ def _newsletter_transport_ready():
     cfg = _newsletter_transport_config()
     required = (cfg["host"], cfg["username"], cfg["password"], cfg["from_email"])
     return all(required)
+
+
+def _buttondown_subscription_config():
+    username = (os.environ.get("BUTTONDOWN_USERNAME") or "alexp").strip().strip("/")
+    endpoint = (os.environ.get("BUTTONDOWN_SUBSCRIBE_ENDPOINT") or "").strip()
+    if not endpoint and username:
+        endpoint = f"https://buttondown.com/api/emails/embed-subscribe/{quote(username, safe='')}"
+    return {
+        "username": username,
+        "endpoint": endpoint,
+    }
+
+
+def _buttondown_subscription_ready():
+    return bool(_buttondown_subscription_config()["endpoint"])
+
+
+def _buttondown_error_message(body):
+    if not body:
+        return None
+    lowered = body.lower()
+    if "already subscribed" in lowered:
+        return "You're already on the daily digest list."
+    match = re.search(r"The email address .*? is not valid\.", body, re.IGNORECASE | re.DOTALL)
+    if match:
+        return html_unescape(re.sub(r"<[^>]+>", "", match.group(0))).strip()
+    match = re.search(r"<div class=\"box auth-error\">.*?<p>(.*?)</p>", body, re.IGNORECASE | re.DOTALL)
+    if match:
+        return html_unescape(re.sub(r"<[^>]+>", "", match.group(1))).strip()
+    return None
+
+
+def _buttondown_subscribe(email):
+    cfg = _buttondown_subscription_config()
+    if not cfg["endpoint"]:
+        raise RuntimeError("buttondown_not_configured")
+    payload = urlencode({
+        "email": email,
+        "embed": "1",
+    }).encode("utf-8")
+    req = Request(
+        cfg["endpoint"],
+        data=payload,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "AlexPavsky Newsletter/1.0",
+        },
+    )
+    try:
+        with urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return {
+                "status": resp.status,
+                "body": body,
+            }
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        message = _buttondown_error_message(body)
+        if message:
+            raise ValueError(message)
+        raise RuntimeError(f"buttondown_http_{exc.code}") from exc
+    except URLError as exc:
+        raise RuntimeError("buttondown_unreachable") from exc
 
 
 def _newsletter_fetch_json(url):
@@ -1164,10 +1232,16 @@ def _provider_available(provider):
 
 
 def _pick(candidates):
-    for m in candidates:
-        if _provider_available(m.get("provider", "groq")):
-            return m
-    return None
+    import random
+    available = [m for m in candidates if _provider_available(m.get("provider", "groq"))]
+    if not available:
+        return None
+        
+    n = len(available)
+    # Linear decay: newest model gets weight 'n', oldest gets '1'
+    weights = [n - i for i in range(n)]
+    
+    return random.choices(available, weights=weights, k=1)[0]
 
 
 def _route(message, attachments):
@@ -2036,22 +2110,18 @@ class Handler(SimpleHTTPRequestHandler):
             return
         ip_hash = _hash_ip(self._client_ip())
         try:
-            with _db_lock:
-                conn = sqlite3.connect(str(DB_PATH))
-                conn.execute(
-                    "INSERT OR IGNORE INTO subscribers (id, email, ip_hash, created_at) VALUES (?, ?, ?, ?)",
-                    (uuid.uuid4().hex, email, ip_hash, time.time()),
-                )
-                conn.commit()
-                conn.close()
+            _buttondown_subscribe(email)
             log.info("subscriber: %s ip=%s", email[:3] + '***', ip_hash[:8])
-            message = "You're subscribed! Weekly AI & QA digest will use the latest site feed."
-            if not _newsletter_transport_ready():
-                message += " Email delivery is ready in code, but SMTP is not configured yet."
-            self._json(200, {"message": message, "weekly_digest": True, "transport_ready": _newsletter_transport_ready()})
+            self._json(200, {
+                "message": "You're in. Check your inbox to confirm your subscription to the daily digest.",
+                "daily_digest": True,
+                "provider": "buttondown",
+            })
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
         except Exception as e:
             log.warning("subscribe error: %s", e)
-            self._json(500, {"error": "Server error. Please try again."})
+            self._json(502, {"error": "Newsletter signup is temporarily unavailable. Please try again."})
 
     def _handle_newsletter_run_now(self):
         try:
@@ -2855,6 +2925,8 @@ def main():
     log.info("Chat server on port %d with %d models", port, len(CHAT_MODELS))
     for p, k in PROVIDER_KEY_ENV.items():
         log.info("  %s: %s", p, "OK" if os.environ.get(k) else "MISSING")
+    buttondown_cfg = _buttondown_subscription_config()
+    log.info("  newsletter signup: %s", buttondown_cfg["endpoint"] if buttondown_cfg["endpoint"] else "MISSING")
     log.info("  newsletter smtp: %s", "OK" if _newsletter_transport_ready() else "MISSING")
     server.serve_forever()
 
