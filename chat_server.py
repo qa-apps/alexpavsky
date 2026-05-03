@@ -288,6 +288,7 @@ PROVIDER_KEY_ENV = {
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "huggingface": "HF_TOKEN",
 }
 
 _STATIC_MODELS = [
@@ -350,16 +351,20 @@ def _update_global_models(new_models):
 
 _update_global_models(_STATIC_MODELS.copy())
 
-def _sync_openrouter_models():
-    """Fetch free models from OpenRouter, categorize them, and update global lists."""
+def _sync_dynamic_models():
+    """Fetch free models from OpenRouter and Hugging Face, categorize them, and update global lists."""
+    import urllib.request
+    import json
+    import datetime
+    
+    dynamic_models = []
+    
+    # 1. Fetch OpenRouter
     try:
-        import urllib.request
-        import json
         req = urllib.request.Request("https://openrouter.ai/api/v1/models")
         with urllib.request.urlopen(req, timeout=15) as res:
             data = json.loads(res.read().decode())
         
-        dynamic_models = []
         for m in data.get("data", []):
             pricing = m.get("pricing", {})
             if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
@@ -369,7 +374,6 @@ def _sync_openrouter_models():
                 lower_name = m_name.lower()
                 created = int(m.get("created", 0))
                 
-                # Exclude specific junk/test models if needed
                 if "test" in lower_id or "experimental" in lower_id:
                     continue
                 
@@ -381,7 +385,6 @@ def _sync_openrouter_models():
                     "created": created
                 }
                 
-                # Heuristics for capabilities
                 if "vision" in lower_id or "vision" in lower_name:
                     model_obj["vision"] = True
                 if "coder" in lower_id or "code" in lower_id or "coder" in lower_name:
@@ -389,7 +392,6 @@ def _sync_openrouter_models():
                 if "r1" in lower_id or "reason" in lower_id or "think" in lower_id:
                     model_obj["reasoning"] = True
                 
-                # Heuristics for tiers
                 ctx_len = int(m.get("context_length", 0))
                 if ctx_len >= 64000 or "70b" in lower_id or "405b" in lower_id or "r1" in lower_id:
                     model_obj["tier"] = "H"
@@ -399,19 +401,68 @@ def _sync_openrouter_models():
                     model_obj["tier"] = "S"
                     
                 dynamic_models.append(model_obj)
-        
-        # Merge with static models
-        merged = _STATIC_MODELS.copy()
-        static_ids = {sm["id"] for sm in merged}
-        
-        for dm in dynamic_models:
-            if dm["id"] not in static_ids:
-                merged.append(dm)
-                
-        _update_global_models(merged)
-        log.info("Synced %d openrouter models (Total: %d)", len(dynamic_models), len(merged))
     except Exception as e:
         log.error("Failed to sync OpenRouter models: %s", e)
+        
+    # 2. Fetch Hugging Face
+    try:
+        req = urllib.request.Request("https://huggingface.co/api/models?pipeline_tag=text-generation&sort=downloads&direction=-1&limit=30")
+        with urllib.request.urlopen(req, timeout=15) as res:
+            hf_data = json.loads(res.read().decode())
+            
+        for m in hf_data:
+            m_id = m.get("id", "")
+            m_name = m_id.split("/")[-1]
+            lower_id = m_id.lower()
+            
+            created_str = m.get("createdAt", "")
+            created = 0
+            if created_str:
+                try:
+                    dt = datetime.datetime.strptime(created_str.split(".")[0], "%Y-%m-%dT%H:%M:%S")
+                    created = int(dt.timestamp())
+                except:
+                    pass
+            
+            if "test" in lower_id or "experimental" in lower_id or "gpt2" in lower_id or "opt" in lower_id:
+                continue
+                
+            model_obj = {
+                "id": m_id,
+                "label": f"HF {m_name}",
+                "provider": "huggingface",
+                "free": True,
+                "created": created
+            }
+            
+            if "vision" in lower_id:
+                model_obj["vision"] = True
+            if "coder" in lower_id or "code" in lower_id:
+                model_obj["coding"] = True
+            if "r1" in lower_id or "reason" in lower_id or "think" in lower_id:
+                model_obj["reasoning"] = True
+                
+            if "70b" in lower_id or "72b" in lower_id or "120b" in lower_id or "r1" in lower_id:
+                model_obj["tier"] = "H"
+            elif "27b" in lower_id or "32b" in lower_id or "34b" in lower_id or "14b" in lower_id:
+                model_obj["tier"] = "M"
+            else:
+                model_obj["tier"] = "S"
+                
+            dynamic_models.append(model_obj)
+    except Exception as e:
+        log.error("Failed to sync Hugging Face models: %s", e)
+        
+    # Merge with static models
+    merged = _STATIC_MODELS.copy()
+    static_ids = {sm["id"] for sm in merged}
+    
+    for dm in dynamic_models:
+        if dm["id"] not in static_ids:
+            merged.append(dm)
+            
+    _update_global_models(merged)
+    log.info("Synced %d dynamic models (Total: %d)", len(dynamic_models), len(merged))
 
 MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 12000
@@ -433,24 +484,17 @@ def _newsletter_now():
     return datetime.now(_newsletter_timezone())
 
 
-def _newsletter_weekday():
-    raw = (os.environ.get("NEWSLETTER_WEEKDAY", "mon") or "mon").strip().lower()
-    mapping = {"mon": 0, "monday": 0, "tue": 1, "tuesday": 1, "wed": 2, "wednesday": 2,
-               "thu": 3, "thursday": 3, "fri": 4, "friday": 4, "sat": 5, "saturday": 5,
-               "sun": 6, "sunday": 6}
-    return mapping.get(raw, 0)
-
-
 def _newsletter_schedule_for_week(now):
-    week_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday())
-    return week_start + timedelta(days=_newsletter_weekday(),
-                                  hours=int(os.environ.get("NEWSLETTER_HOUR", "9")),
-                                  minutes=int(os.environ.get("NEWSLETTER_MINUTE", "0")))
+    return now.replace(
+        hour=int(os.environ.get("NEWSLETTER_HOUR", "9") or "9"),
+        minute=int(os.environ.get("NEWSLETTER_MINUTE", "0") or "0"),
+        second=0,
+        microsecond=0,
+    )
 
 
 def _newsletter_week_key(now):
-    iso = now.isocalendar()
-    return f"{iso[0]}-W{iso[1]:02d}"
+    return now.strftime("%Y-%m-%d")
 
 
 def _mail_transport_config():
@@ -517,6 +561,17 @@ def _buttondown_subscription_ready():
     return bool(_buttondown_subscription_config()["endpoint"])
 
 
+def _buttondown_api_config():
+    return {
+        "api_key": (os.environ.get("BUTTONDOWN_API_KEY") or "").strip(),
+        "base_url": (os.environ.get("BUTTONDOWN_API_BASE_URL") or "https://api.buttondown.com/v1").strip().rstrip("/"),
+    }
+
+
+def _buttondown_api_ready():
+    return bool(_buttondown_api_config()["api_key"])
+
+
 def _buttondown_error_message(body):
     if not body:
         return None
@@ -563,6 +618,24 @@ def _buttondown_subscribe(email):
         raise RuntimeError(f"buttondown_http_{exc.code}") from exc
     except URLError as exc:
         raise RuntimeError("buttondown_unreachable") from exc
+
+
+def _buttondown_api_request(method, path, payload=None):
+    cfg = _buttondown_api_config()
+    if not cfg["api_key"]:
+        raise RuntimeError("buttondown_api_not_configured")
+    data = None
+    headers = {
+        "Authorization": f"Token {cfg['api_key']}",
+        "User-Agent": "AlexPavsky Newsletter/1.0",
+    }
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = Request(f"{cfg['base_url']}{path}", data=data, headers=headers, method=method.upper())
+    with urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode("utf-8", errors="replace").strip()
+        return json.loads(raw) if raw else {}
 
 
 def _newsletter_fetch_json(url):
@@ -629,18 +702,40 @@ def _newsletter_fetch_articles(days=7, per_source=4):
     return articles[: int(os.environ.get("NEWSLETTER_MAX_ARTICLES", "12") or "12")]
 
 
+def _newsletter_pick_digest_articles(articles, limit=3):
+    preferred = []
+    seen_links = set()
+    for category in ("ai", "qa", "dev"):
+        for article in articles:
+            if article.get("category") != category:
+                continue
+            link = article.get("link")
+            if not link or link in seen_links:
+                continue
+            preferred.append(article)
+            seen_links.add(link)
+            break
+    for article in articles:
+        link = article.get("link")
+        if not link or link in seen_links:
+            continue
+        preferred.append(article)
+        seen_links.add(link)
+        if len(preferred) >= limit:
+            break
+    return preferred[:limit]
+
+
 def _newsletter_subject(articles, now):
     if articles:
-        newest = articles[0]["published_at"].strftime("%b %d")
-        oldest = articles[-1]["published_at"].strftime("%b %d")
-        return f"Alex Pavsky Weekly AI & QA Digest · {oldest} – {newest}"
-    return f"Alex Pavsky Weekly AI & QA Digest · {_newsletter_week_key(now)}"
+        return f"Alex Pavsky Daily AI, QA & Agent Automation Digest · {now.strftime('%b %d, %Y')}"
+    return f"Alex Pavsky Daily AI, QA & Agent Automation Digest · {now.strftime('%b %d, %Y')}"
 
 
 def _newsletter_render(articles, now):
     subject = _newsletter_subject(articles, now)
     site_url = os.environ.get("NEWSLETTER_SITE_URL", "https://www.alexpavsky.com").strip() or "https://www.alexpavsky.com"
-    intro = "Latest AI, QA, and engineering articles from Alex Pavsky's site feed."
+    intro = "Three practical updates across AI, QA, and agent automation from Alex Pavsky's live feed."
 
     text_lines = [subject, "", intro, ""]
     html_items = []
@@ -674,7 +769,7 @@ def _newsletter_render(articles, now):
         "<tr><td align='center'>"
         "<table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='max-width:700px;background:#f8fafc;border-radius:20px;overflow:hidden;'>"
         "<tr><td style='padding:32px 32px 20px;background:linear-gradient(135deg,#111827,#1e293b);color:#fff;'>"
-        "<div style='font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#7dd3fc;margin-bottom:10px;'>Weekly Digest</div>"
+        "<div style='font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#7dd3fc;margin-bottom:10px;'>Daily Digest</div>"
         f"<h1 style='margin:0 0 10px;font-size:30px;line-height:1.2;'>{html_escape(subject)}</h1>"
         f"<p style='margin:0;font-size:16px;line-height:1.6;color:#cbd5e1;'>{html_escape(intro)}</p>"
         "</td></tr>"
@@ -861,6 +956,22 @@ def _newsletter_send_email(recipient, subject, text_body, html_body):
         server.send_message(message)
 
 
+def _newsletter_send_via_buttondown(subject, text_body, html_body):
+    draft = _buttondown_api_request("POST", "/emails", {
+        "subject": subject,
+        "body": html_body,
+        "status": "draft",
+        "email_type": "public",
+    })
+    email_id = draft.get("id")
+    if not email_id:
+        raise RuntimeError("buttondown_email_create_failed")
+    _buttondown_api_request("PATCH", f"/emails/{email_id}", {
+        "status": "about_to_send",
+    })
+    return email_id
+
+
 def _newsletter_should_run(now=None):
     now = now or _newsletter_now()
     scheduled_at = _newsletter_schedule_for_week(now)
@@ -882,28 +993,19 @@ def _newsletter_run(run_type="manual", force=False):
     if run_type == "scheduled" and not force and not should_run:
         return {"ok": True, "status": "skipped", "reason": "not_due", "week_key": week_key}
 
-    articles = _newsletter_fetch_articles(days=int(os.environ.get("NEWSLETTER_DIGEST_DAYS", "7") or "7"))
+    articles = _newsletter_fetch_articles(days=int(os.environ.get("NEWSLETTER_DIGEST_DAYS", "2") or "2"))
+    articles = _newsletter_pick_digest_articles(articles, limit=int(os.environ.get("NEWSLETTER_MAX_ARTICLES", "3") or "3"))
     payload = _newsletter_render(articles, now)
-    subscribers = _newsletter_subscribers()
+    provider = "buttondown" if _buttondown_api_ready() else ("smtp" if _newsletter_transport_ready() else "none")
 
-    if not subscribers:
-        return {
-            "ok": True,
-            "status": "skipped",
-            "reason": "no_subscribers",
-            "week_key": week_key,
-            "article_count": len(articles),
-            "subject": payload["subject"],
-        }
-
-    if not _newsletter_transport_ready():
+    if provider == "none":
         return {
             "ok": False,
             "status": "dry_run",
             "reason": "newsletter_transport_not_configured",
             "week_key": week_key,
             "article_count": len(articles),
-            "subscriber_count": len(subscribers),
+            "subscriber_count": 0,
             "subject": payload["subject"],
             "preview_html": payload["html"],
         }
@@ -914,33 +1016,49 @@ def _newsletter_run(run_type="manual", force=False):
             conn = sqlite3.connect(str(DB_PATH))
             conn.execute(
                 "INSERT INTO newsletter_runs (id, week_key, run_type, status, subject, article_count, subscriber_count, sent_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_id, week_key, run_type, "running", payload["subject"], len(articles), len(subscribers), 0, time.time()),
+                (run_id, week_key, run_type, "running", payload["subject"], len(articles), 0, 0, time.time()),
             )
             conn.commit()
             conn.close()
 
-        sent_count = 0
         errors = []
-        for email in subscribers:
-            try:
-                _newsletter_send_email(email, payload["subject"], payload["text"], payload["html"])
-                status = "sent"
-                error = ""
-                sent_count += 1
-            except Exception as exc:
-                status = "failed"
-                error = str(exc)[:500]
-                errors.append(f"{email}: {error}")
-            with _db_lock:
-                conn = sqlite3.connect(str(DB_PATH))
-                conn.execute(
-                    "INSERT INTO newsletter_deliveries (id, run_id, email, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (uuid.uuid4().hex, run_id, email, status, error, time.time()),
-                )
-                conn.commit()
-                conn.close()
+        sent_count = 0
+        try:
+            if provider == "buttondown":
+                remote_id = _newsletter_send_via_buttondown(payload["subject"], payload["text"], payload["html"])
+                sent_count = 1
+                with _db_lock:
+                    conn = sqlite3.connect(str(DB_PATH))
+                    conn.execute(
+                        "INSERT INTO newsletter_deliveries (id, run_id, email, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (uuid.uuid4().hex, run_id, "buttondown:broadcast", "sent", remote_id, time.time()),
+                    )
+                    conn.commit()
+                    conn.close()
+            else:
+                subscribers = _newsletter_subscribers()
+                for email in subscribers:
+                    try:
+                        _newsletter_send_email(email, payload["subject"], payload["text"], payload["html"])
+                        status = "sent"
+                        error = ""
+                        sent_count += 1
+                    except Exception as exc:
+                        status = "failed"
+                        error = str(exc)[:500]
+                        errors.append(f"{email}: {error}")
+                    with _db_lock:
+                        conn = sqlite3.connect(str(DB_PATH))
+                        conn.execute(
+                            "INSERT INTO newsletter_deliveries (id, run_id, email, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                            (uuid.uuid4().hex, run_id, email, status, error, time.time()),
+                        )
+                        conn.commit()
+                        conn.close()
+        except Exception as exc:
+            errors.append(str(exc)[:500])
 
-        final_status = "sent" if sent_count == len(subscribers) else ("partial" if sent_count else "failed")
+        final_status = "sent" if sent_count else "failed"
         with _db_lock:
             conn = sqlite3.connect(str(DB_PATH))
             conn.execute(
@@ -955,16 +1073,18 @@ def _newsletter_run(run_type="manual", force=False):
         "status": final_status,
         "week_key": week_key,
         "article_count": len(articles),
-        "subscriber_count": len(subscribers),
+        "subscriber_count": 0,
         "sent_count": sent_count,
         "subject": payload["subject"],
+        "provider": provider,
         "errors": errors[:5],
     }
 
 
 def _newsletter_preview():
     now = _newsletter_now()
-    articles = _newsletter_fetch_articles(days=int(os.environ.get("NEWSLETTER_DIGEST_DAYS", "7") or "7"))
+    articles = _newsletter_fetch_articles(days=int(os.environ.get("NEWSLETTER_DIGEST_DAYS", "2") or "2"))
+    articles = _newsletter_pick_digest_articles(articles, limit=int(os.environ.get("NEWSLETTER_MAX_ARTICLES", "3") or "3"))
     payload = _newsletter_render(articles, now)
     return {
         "ok": True,
@@ -973,7 +1093,7 @@ def _newsletter_preview():
         "subject": payload["subject"],
         "html": payload["html"],
         "text": payload["text"],
-        "transport_ready": _newsletter_transport_ready(),
+        "transport_ready": _newsletter_transport_ready() or _buttondown_api_ready(),
         "subscriber_count": len(_newsletter_subscribers()),
     }
 
@@ -987,10 +1107,10 @@ def _newsletter_status():
     conn.close()
     return {
         "ok": True,
-        "transport_ready": _newsletter_transport_ready(),
+        "transport_ready": _newsletter_transport_ready() or _buttondown_api_ready(),
         "subscriber_count": subscribers,
         "schedule": {
-            "weekday": _newsletter_weekday(),
+            "frequency": "daily",
             "hour": int(os.environ.get("NEWSLETTER_HOUR", "9") or "9"),
             "minute": int(os.environ.get("NEWSLETTER_MINUTE", "0") or "0"),
             "timezone": os.environ.get("NEWSLETTER_TIMEZONE", "America/New_York"),
@@ -1003,7 +1123,7 @@ def _newsletter_scheduler_loop():
     interval = int(os.environ.get("NEWSLETTER_CHECK_INTERVAL_SECONDS", "1800") or "1800")
     while True:
         try:
-            if _newsletter_transport_ready():
+            if _newsletter_transport_ready() or _buttondown_api_ready():
                 result = _newsletter_run(run_type="scheduled")
                 if result.get("status") not in ("skipped",):
                     log.info("newsletter scheduler result: %s", result)
@@ -1017,7 +1137,7 @@ def _model_sync_loop():
         # Sleep for 7 days (7 * 24 * 60 * 60 seconds)
         time.sleep(604800)
         try:
-            _sync_openrouter_models()
+            _sync_dynamic_models()
         except Exception as exc:
             log.warning("model sync scheduler error: %s", exc)
 
@@ -1124,6 +1244,53 @@ def _feed_cached_articles():
     _feed_cache["articles"] = articles
     _feed_cache["fetched_at"] = now_ts
     return articles
+
+
+def _rss_feed_xml():
+    site_url = (os.environ.get("NEWSLETTER_SITE_URL") or "https://alexpavsky.com").strip() or "https://alexpavsky.com"
+    feed_url = site_url.rstrip("/") + "/rss.xml"
+    articles = _feed_cached_articles()[:30]
+    last_build = datetime.now(timezone.utc)
+    if articles:
+        latest = _newsletter_parse_date(articles[0].get("date"))
+        if latest:
+            last_build = latest.astimezone(timezone.utc)
+
+    items_xml = []
+    for article in articles:
+        link = article.get("link") or site_url
+        published = _newsletter_parse_date(article.get("date")) or last_build
+        source = article.get("source") or "Alex Pavsky Feed"
+        category = _newsletter_category_label(article.get("category"))
+        title = html_escape(article.get("title") or "Untitled")
+        description = html_escape(article.get("description") or "")
+        item = (
+            "<item>"
+            f"<title>{title}</title>"
+            f"<link>{html_escape(link)}</link>"
+            f"<guid isPermaLink='true'>{html_escape(link)}</guid>"
+            f"<pubDate>{published.astimezone(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')}</pubDate>"
+            f"<category>{html_escape(category)}</category>"
+            f"<source url='{html_escape(site_url)}'>{html_escape(source)}</source>"
+            f"<description>{description}</description>"
+            "</item>"
+        )
+        items_xml.append(item)
+
+    return (
+        "<?xml version='1.0' encoding='UTF-8'?>"
+        "<rss version='2.0'>"
+        "<channel>"
+        "<title>Daily AI, QA &amp; Agent Automation Digest</title>"
+        f"<link>{html_escape(site_url)}</link>"
+        "<description>A daily digest of AI, QA, testing, and agent automation updates curated from Alex Pavsky's live feed.</description>"
+        "<language>en-us</language>"
+        f"<lastBuildDate>{last_build.astimezone(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')}</lastBuildDate>"
+        f"<atom:link xmlns:atom='http://www.w3.org/2005/Atom' href='{html_escape(feed_url)}' rel='self' type='application/rss+xml' />"
+        + "".join(items_xml) +
+        "</channel>"
+        "</rss>"
+    )
 
 
 # ─── YouTube Feed ─────────────────────────────────────────────────────────────
@@ -1422,7 +1589,14 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
         if provider == "openrouter":
             headers["HTTP-Referer"] = OPENROUTER_REFERER
             headers["X-Title"] = OPENROUTER_TITLE
-        req = Request(GROQ_API_URL if provider == "groq" else OPENROUTER_API_URL, data=json.dumps(payload).encode(), headers=headers, method="POST")
+            
+        base_url = GROQ_API_URL
+        if provider == "openrouter":
+            base_url = OPENROUTER_API_URL
+        elif provider == "huggingface":
+            base_url = f"https://api-inference.huggingface.co/models/{model['id']}/v1/chat/completions"
+            
+        req = Request(base_url, data=json.dumps(payload).encode(), headers=headers, method="POST")
         with urlopen(req, timeout=25) as resp:
             return _extract_reply(json.loads(resp.read().decode())), None
     except HTTPError as e:
@@ -1807,6 +1981,15 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/feed":
             self._json(200, {"articles": _feed_cached_articles()})
+            return
+        if path == "/rss.xml":
+            xml = _rss_feed_xml().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/rss+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(xml)))
+            self.send_header("Cache-Control", "public, max-age=900")
+            self.end_headers()
+            self.wfile.write(xml)
             return
         if path == "/api/youtube":
             self._json(200, {"videos": _youtube_cached_videos()})
@@ -2893,10 +3076,10 @@ CRITICAL RULES:
 def _warmup_caches():
     """Pre-fetch feed and YouTube caches on startup so first request is instant."""
     try:
-        log.info("Warming up OpenRouter models...")
-        _sync_openrouter_models()
+        log.info("Warming up dynamic models...")
+        _sync_dynamic_models()
     except Exception as e:
-        log.warning("OpenRouter warmup failed: %s", e)
+        log.warning("Dynamic models warmup failed: %s", e)
     try:
         log.info("Warming up feed cache...")
         _feed_cached_articles()
@@ -2927,6 +3110,7 @@ def main():
         log.info("  %s: %s", p, "OK" if os.environ.get(k) else "MISSING")
     buttondown_cfg = _buttondown_subscription_config()
     log.info("  newsletter signup: %s", buttondown_cfg["endpoint"] if buttondown_cfg["endpoint"] else "MISSING")
+    log.info("  newsletter buttondown api: %s", "OK" if _buttondown_api_ready() else "MISSING")
     log.info("  newsletter smtp: %s", "OK" if _newsletter_transport_ready() else "MISSING")
     server.serve_forever()
 
