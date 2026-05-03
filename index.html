@@ -100,6 +100,7 @@
             <div class="glow glow-2"></div>
             <div class="glow glow-3"></div>
         </div>
+        <div class="hero-inner">
         <div class="hero-content">
             <div class="hero-badge">
                 <span class="pulse-dot"></span>
@@ -137,14 +138,109 @@
             </div>
         </div>
         <div class="hero-visual">
-            <div class="terminal-card">
-                <div class="terminal-header">
-                    <span class="terminal-dot red"></span>
-                    <span class="terminal-dot yellow"></span>
-                    <span class="terminal-dot green"></span>
-                    <span class="terminal-title">ai-radar.sh</span>
+            <div class="hero-3d-scene">
+                <div class="terminal-card">
+                    <div class="terminal-header">
+                        <span class="terminal-dot red"></span>
+                        <span class="terminal-dot yellow"></span>
+                        <span class="terminal-dot green"></span>
+                        <span class="terminal-title">promptfoo eval.yaml</span>
+                    </div>
+                    <div class="terminal-body" id="terminal-body"></div>
                 </div>
-                <div class="terminal-body" id="terminal-body"></div>
+                <div class="aitest-card">
+                    <div class="aitest-header">
+                        <span class="aitest-title">AI Test Result</span>
+                        <span class="aitest-pass-badge">PASS</span>
+                    </div>
+                    <div class="aitest-body">
+                        <div class="aitest-gauge-wrap">
+                            <svg class="aitest-gauge" viewBox="0 0 80 80">
+                                <circle cx="40" cy="40" r="30" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="7"/>
+                                <circle cx="40" cy="40" r="30" fill="none" stroke="#22c55e" stroke-width="7"
+                                    stroke-dasharray="188.5" stroke-dashoffset="33.9"
+                                    stroke-linecap="round" transform="rotate(-90 40 40)"/>
+                            </svg>
+                            <div class="aitest-gauge-center">
+                                <span class="aitest-score">82</span>
+                                <span class="aitest-score-lbl">Safety</span>
+                            </div>
+                        </div>
+                        <div class="aitest-items">
+                            <div class="aitest-item">
+                                <i class="fas fa-check-circle aitest-icon pass"></i>
+                                <span class="aitest-item-name">Prompt Injection</span>
+                                <span class="aitest-status pass">Passed</span>
+                            </div>
+                            <div class="aitest-item">
+                                <i class="fas fa-check-circle aitest-icon pass"></i>
+                                <span class="aitest-item-name">RAG Grounding</span>
+                                <span class="aitest-status pass">Passed</span>
+                            </div>
+                            <div class="aitest-item">
+                                <i class="fas fa-exclamation-circle aitest-icon warn"></i>
+                                <span class="aitest-item-name">Hallucination</span>
+                                <span class="aitest-status warn">Warning</span>
+                            </div>
+                            <div class="aitest-item">
+                                <i class="fas fa-check-circle aitest-icon pass"></i>
+                                <span class="aitest-item-name">Toxicity</span>
+                                <span class="aitest-status pass">Passed</span>
+                            </div>
+                        </div>
+                    </div>
+                    <svg class="aitest-sparkline" viewBox="0 0 200 36" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#6366f1" stop-opacity="0.4"/>
+                                <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+                            </linearGradient>
+                        </defs>
+                        <polygon points="0,36 0,26 25,20 50,28 75,12 100,18 125,8 150,14 175,6 200,10 200,36" fill="url(#spark-grad)"/>
+                        <polyline points="0,26 25,20 50,28 75,12 100,18 125,8 150,14 175,6 200,10"
+                            fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+                    </svg>
+                </div><!-- /aitest-card -->
+            </div><!-- /hero-3d-scene -->
+        </div><!-- /hero-visual -->
+        </div><!-- /hero-inner -->
+        <!-- ── Quick Tools Strip ── -->
+        <div class="tools-strip">
+            <div class="container">
+                <div class="tools-strip-grid">
+                    <button class="tool-strip-card" onclick="document.getElementById('open-attackgen-btn').click()">
+                        <div class="tool-strip-icon" style="--c:#ef4444"><i class="fas fa-crosshairs"></i></div>
+                        <div class="tool-strip-info">
+                            <span class="tool-strip-name">Attack Generator</span>
+                            <span class="tool-strip-desc">Adversarial red-team prompts</span>
+                        </div>
+                        <span class="tool-strip-arrow" style="color:#ef4444">→</span>
+                    </button>
+                    <button class="tool-strip-card" onclick="document.getElementById('open-pitest-btn').click()">
+                        <div class="tool-strip-icon" style="--c:#a855f7"><i class="fas fa-shield-virus"></i></div>
+                        <div class="tool-strip-info">
+                            <span class="tool-strip-name">Prompt Injection Test</span>
+                            <span class="tool-strip-desc">Scan for hidden injections</span>
+                        </div>
+                        <span class="tool-strip-arrow" style="color:#a855f7">→</span>
+                    </button>
+                    <button class="tool-strip-card" onclick="document.getElementById('open-hallucination-btn').click()">
+                        <div class="tool-strip-icon" style="--c:#22c55e"><i class="fas fa-microscope"></i></div>
+                        <div class="tool-strip-info">
+                            <span class="tool-strip-name">RAG Tester</span>
+                            <span class="tool-strip-desc">Grounding &amp; hallucination score</span>
+                        </div>
+                        <span class="tool-strip-arrow" style="color:#22c55e">→</span>
+                    </button>
+                    <button class="tool-strip-card" onclick="document.getElementById('open-hallucination-btn').click()">
+                        <div class="tool-strip-icon" style="--c:#f59e0b"><i class="fas fa-brain"></i></div>
+                        <div class="tool-strip-info">
+                            <span class="tool-strip-name">Hallucination Tester</span>
+                            <span class="tool-strip-desc">Atomic fact verification</span>
+                        </div>
+                        <span class="tool-strip-arrow" style="color:#f59e0b">→</span>
+                    </button>
+                </div>
             </div>
         </div>
     </header>

@@ -1600,7 +1600,11 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
 
         req = Request(base_url, data=json.dumps(payload).encode(), headers=headers, method="POST")
         with urlopen(req, timeout=25) as resp:
-            return _extract_reply(json.loads(resp.read().decode())), None
+            raw = resp.read().decode()
+            # Guard: some providers return HTML error pages on failure
+            if raw.lstrip().startswith("<"):
+                return None, f"html_response:{raw[:80]}"
+            return _extract_reply(json.loads(raw)), None
     except HTTPError as e:
         body = ""
         try:
@@ -2640,15 +2644,24 @@ class Handler(SimpleHTTPRequestHandler):
         bot_reply, err = _call_model(target_model, target_system, user_prompt, 512)
 
         if not bot_reply or not bot_reply.strip():
-            chain = _get_fallback_chain(target_model, "S")
-            for fb in chain[:4]:
-                bot_reply, err = _call_model(fb, target_system, user_prompt, 512)
+            log.warning("challenge target fail: cat=%s model=%s err=%s", category, target_model["label"], err)
+            # Aggressive fallback: try all tiers and all providers
+            for tier in ["S", "M", "H"]:
+                chain = _get_fallback_chain(target_model, tier)
+                for fb in chain[:6]:
+                    log.info("challenge fallback: %s -> %s", target_model["label"], fb["label"])
+                    bot_reply, err = _call_model(fb, target_system, user_prompt, 512)
+                    if bot_reply and bot_reply.strip():
+                        target_model = fb
+                        break
+                    if err:
+                        log.warning("challenge fallback err: %s -> %s: %s", target_model["label"], fb["label"], err)
+                    time.sleep(0.3)
                 if bot_reply and bot_reply.strip():
-                    target_model = fb
                     break
-                time.sleep(0.3)
 
         if not bot_reply or not bot_reply.strip():
+            log.error("challenge all targets failed: cat=%s", category)
             self._json(502, {"error": "target_unavailable", "message": "Target AI is temporarily unavailable. Try again."})
             return
 

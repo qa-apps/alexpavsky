@@ -290,13 +290,24 @@ img { max-width: 100%; display: block; }
 .hero {
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     justify-content: center;
-    padding: 6rem 1.5rem 4rem;
+    padding: 6rem 1.5rem 0;
     position: relative;
     z-index: 1;
-    position: relative;
     overflow: hidden;
+}
+
+.hero-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0;
+    flex: 1;
 }
 
 .hero-bg {
@@ -485,17 +496,259 @@ img { max-width: 100%; display: block; }
     position: relative;
     z-index: 2;
     margin-left: 3rem;
+    perspective: 1200px;
+}
+
+/* ─── 3D Scene ─── */
+.hero-3d-scene {
+    position: relative;
+    transform-style: preserve-3d;
 }
 
 /* ─── Terminal Card ─── */
 .terminal-card {
     width: 420px;
-    background: rgba(17, 17, 24, 0.9);
+    background: rgba(17, 17, 24, 0.92);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
-    box-shadow: var(--shadow-lg);
     backdrop-filter: blur(20px);
+    transform: rotateY(-10deg) rotateX(4deg) rotateZ(-1deg);
+    transform-origin: center center;
+    box-shadow:
+        0 30px 60px rgba(0,0,0,0.6),
+        -12px 24px 40px rgba(0,0,0,0.4),
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        0 0 0 1px rgba(99,102,241,0.08);
+    transition: transform 0.5s cubic-bezier(0.23,1,0.32,1), box-shadow 0.5s ease;
+}
+
+.hero-3d-scene:hover .terminal-card {
+    transform: rotateY(-5deg) rotateX(2deg) rotateZ(-0.5deg);
+    box-shadow:
+        0 40px 80px rgba(0,0,0,0.5),
+        -8px 16px 30px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        0 0 0 1px rgba(99,102,241,0.15);
+}
+
+/* ─── AI Test Result Card ─── */
+.aitest-card {
+    position: absolute;
+    bottom: -28px;
+    right: -44px;
+    width: 210px;
+    background: rgba(10, 12, 28, 0.96);
+    border: 1px solid rgba(99,102,241,0.35);
+    border-radius: 16px;
+    padding: 0.9rem;
+    backdrop-filter: blur(24px);
+    box-shadow:
+        0 20px 50px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(99,102,241,0.1),
+        0 0 30px rgba(99,102,241,0.08);
+    animation: aitest-float 5s ease-in-out infinite;
+    z-index: 10;
+}
+
+@keyframes aitest-float {
+    0%, 100% { transform: translateY(0px) rotateY(2deg); }
+    50%       { transform: translateY(-8px) rotateY(2deg); }
+}
+
+.aitest-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.aitest-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.aitest-pass-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #22c55e;
+    background: rgba(34,197,94,0.12);
+    border: 1px solid rgba(34,197,94,0.3);
+    border-radius: 6px;
+    padding: 2px 8px;
+    letter-spacing: 0.05em;
+}
+
+.aitest-body {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.aitest-gauge-wrap {
+    position: relative;
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+}
+
+.aitest-gauge {
+    width: 56px;
+    height: 56px;
+    display: block;
+}
+
+.aitest-gauge-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.aitest-score {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+}
+
+.aitest-score-lbl {
+    font-size: 0.5rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.aitest-items {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.aitest-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.62rem;
+}
+
+.aitest-item-name {
+    flex: 1;
+    color: var(--text-secondary);
+}
+
+.aitest-icon.pass { color: #22c55e; font-size: 0.6rem; }
+.aitest-icon.warn { color: #f59e0b; font-size: 0.6rem; }
+
+.aitest-status {
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+.aitest-status.pass { color: #22c55e; }
+.aitest-status.warn { color: #f59e0b; }
+
+.aitest-sparkline {
+    display: block;
+    width: 100%;
+    height: 28px;
+    margin-top: 0.25rem;
+    border-radius: 0 0 8px 8px;
+    overflow: visible;
+}
+
+/* ─── Quick Tools Strip (inside hero, bottom row) ─── */
+.tools-strip {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    padding: 1rem 0 1.25rem;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    margin-top: auto;
+}
+
+.tools-strip-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+.tool-strip-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+    text-align: left;
+    width: 100%;
+    font-family: inherit;
+}
+
+.tool-strip-card:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--c, rgba(255,255,255,0.15));
+    transform: translateY(-2px);
+}
+
+.tool-strip-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--c) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--c);
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+.tool-strip-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.tool-strip-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tool-strip-desc {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tool-strip-arrow {
+    font-size: 1rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+}
+
+.tool-strip-card:hover .tool-strip-arrow {
+    transform: translateX(3px);
 }
 
 .terminal-header {
