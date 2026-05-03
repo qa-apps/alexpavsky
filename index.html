@@ -344,11 +344,11 @@
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
-                    <div class="lab-icon"><i class="fas fa-code"></i></div>
-                    <h3>JSON Formatter</h3>
-                    <p>Paste messy JSON, get it pretty-printed. A tool I use daily.</p>
-                    <button class="btn btn-glass btn-sm" id="open-json-btn">
-                        <i class="fas fa-code"></i> Open Tool
+                    <div class="lab-icon" style="color:#a855f7"><i class="fas fa-microscope"></i></div>
+                    <h3>RAG Hallucination Tester</h3>
+                    <p>Paste your source context, prompt and AI response. Get a Hallucination Score with atomic fact analysis.</p>
+                    <button class="btn btn-glass btn-sm" id="open-hallucination-btn">
+                        <i class="fas fa-microscope"></i> Run Analysis
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
@@ -577,21 +577,33 @@
         </div>
     </div>
 
-    <div class="json-modal" id="json-modal">
+    <div class="diff-modal" id="hallucination-modal">
         <div class="modal-overlay"></div>
-        <div class="modal-content">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h3><i class="fas fa-code"></i> JSON Formatter</h3>
-                <button class="modal-close" id="json-modal-close"><i class="fas fa-times"></i></button>
+                <h3><i class="fas fa-microscope" style="color:#a855f7"></i> RAG Hallucination Tester</h3>
+                <button class="modal-close" id="hallucination-modal-close"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
-                <textarea id="json-input" class="code-input" placeholder="Paste your JSON here..."></textarea>
-                <div class="modal-actions">
-                    <button class="btn btn-primary btn-sm" id="json-format-btn">Format</button>
-                    <button class="btn btn-glass btn-sm" id="json-copy-btn">Copy</button>
-                    <button class="btn btn-glass btn-sm" id="json-clear-btn">Clear</button>
+                <div class="hallucination-form">
+                    <div class="hallucination-field">
+                        <label class="hallucination-label"><i class="fas fa-file-lines" style="color:#10b981"></i> Source Context <span class="hallucination-hint">(ground truth — paste your document, RAG chunk, policy or knowledge base text)</span></label>
+                        <textarea id="hallucination-context" class="code-input hallucination-textarea" placeholder="Paste the source text your AI should base its answer on..."></textarea>
+                    </div>
+                    <div class="hallucination-field">
+                        <label class="hallucination-label"><i class="fas fa-comment-dots" style="color:#6366f1"></i> User Prompt <span class="hallucination-hint">(what was asked)</span></label>
+                        <textarea id="hallucination-prompt" class="code-input hallucination-textarea hallucination-textarea-sm" placeholder="What was the user question or instruction sent to the AI?"></textarea>
+                    </div>
+                    <div class="hallucination-field">
+                        <label class="hallucination-label"><i class="fas fa-robot" style="color:#f59e0b"></i> AI Response <span class="hallucination-hint">(the output you want to verify)</span></label>
+                        <textarea id="hallucination-answer" class="code-input hallucination-textarea" placeholder="Paste the AI response you want to analyse for hallucinations..."></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-primary btn-sm" id="hallucination-run-btn"><i class="fas fa-microscope"></i> Analyse Response</button>
+                        <button class="btn btn-glass btn-sm" id="hallucination-clear-btn"><i class="fas fa-trash"></i> Clear</button>
+                    </div>
                 </div>
-                <pre id="json-output" class="code-output"></pre>
+                <div id="hallucination-output" class="hallucination-output"></div>
             </div>
         </div>
     </div>
@@ -819,6 +831,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260503-0419"></script>
+    <script src="script.js?v=20260503-0453"></script>
 </body>
 </html>

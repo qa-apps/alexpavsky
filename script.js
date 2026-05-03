@@ -605,18 +605,28 @@
         return selected.slice(0, FEED_CARDS_PER_VIEW);
     }
 
+    function stripHtml(html) {
+        var tmp = document.createElement('DIV');
+        tmp.innerHTML = html || '';
+        return tmp.textContent || tmp.innerText || '';
+    }
+
     function renderArticle(article) {
         var card = document.createElement('a');
         card.className = 'feed-card';
         card.href = article.link;
         card.setAttribute('data-category', article.category);
+        
+        var plainDesc = stripHtml(article.description);
+        if (plainDesc.length > 120) plainDesc = plainDesc.substring(0, 117) + '...';
+
         card.innerHTML =
             '<div class="feed-card-source">' +
                 '<span class="feed-source-name">' + escapeHtml(article.source) + '</span>' +
                 '<span class="feed-card-date">' + formatFeedTimeAgo(article.date) + '</span>' +
             '</div>' +
             '<h3>' + escapeHtml(article.title) + '</h3>' +
-            '<p>' + escapeHtml(article.description) + '</p>' +
+            '<p>' + escapeHtml(plainDesc) + '</p>' +
             '<span class="feed-card-tag">' + getCategoryLabel(article.category) + '</span>';
         card.addEventListener('click', function (e) {
             e.preventDefault();
@@ -1366,64 +1376,124 @@
     });
 
 
-    // ─── JSON Formatter ───
-    var jsonModal = document.getElementById('json-modal');
-    var openJsonBtn = document.getElementById('open-json-btn');
-    var jsonModalClose = document.getElementById('json-modal-close');
-    var jsonFormatBtn = document.getElementById('json-format-btn');
-    var jsonCopyBtn = document.getElementById('json-copy-btn');
-    var jsonClearBtn = document.getElementById('json-clear-btn');
-    var jsonInput = document.getElementById('json-input');
-    var jsonOutput = document.getElementById('json-output');
-
+    // ─── RAG Hallucination Tester ───
     function openModal(modal) { if (modal) modal.classList.add('active'); }
     function closeModal(modal) { if (modal) modal.classList.remove('active'); }
 
-    if (openJsonBtn) openJsonBtn.addEventListener('click', function () { openModal(jsonModal); });
-    if (jsonModalClose) jsonModalClose.addEventListener('click', function () { closeModal(jsonModal); });
-    if (jsonModal) {
-        jsonModal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(jsonModal); });
-    }
+    (function initHallucinationTester() {
+        var modal = document.getElementById('hallucination-modal');
+        var openBtn = document.getElementById('open-hallucination-btn');
+        var closeBtn = document.getElementById('hallucination-modal-close');
+        var runBtn = document.getElementById('hallucination-run-btn');
+        var clearBtn = document.getElementById('hallucination-clear-btn');
+        var contextInput = document.getElementById('hallucination-context');
+        var promptInput = document.getElementById('hallucination-prompt');
+        var answerInput = document.getElementById('hallucination-answer');
+        var output = document.getElementById('hallucination-output');
+        if (!modal) return;
 
-    if (jsonFormatBtn && jsonInput && jsonOutput) {
-        jsonFormatBtn.addEventListener('click', function () {
-            var raw = jsonInput.value.trim();
-            if (!raw) {
-                jsonOutput.textContent = 'Paste some JSON above and click Format.';
-                jsonOutput.style.color = 'var(--text-dim)';
+        if (openBtn) openBtn.addEventListener('click', function () { openModal(modal); });
+        if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); });
+        if (modal) modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); });
+
+        if (clearBtn) clearBtn.addEventListener('click', function () {
+            contextInput.value = '';
+            promptInput.value = '';
+            answerInput.value = '';
+            output.innerHTML = '';
+        });
+
+        if (runBtn) runBtn.addEventListener('click', async function () {
+            var context = (contextInput.value || '').trim();
+            var prompt = (promptInput.value || '').trim();
+            var answer = (answerInput.value || '').trim();
+            if (!answer) {
+                output.innerHTML = '<div class="hallucination-error">Please paste an AI response to analyse.</div>';
                 return;
             }
-            // Auto-fix common issues: trailing commas, single quotes → double quotes
-            var fixed = raw
-                .replace(/,\s*([}\]])/g, '$1')                      // trailing commas
-                .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')          // unquoted keys
-                .replace(/:\s*'([^']*)'/g, ': "$1"');                // single-quoted values
+            output.innerHTML = '<div class="hallucination-loading"><div class="spinner"></div><p>Analysing response with LLM judge\u2026</p></div>';
+            runBtn.disabled = true;
             try {
-                var parsed = JSON.parse(fixed);
-                var pretty = JSON.stringify(parsed, null, 2);
-                jsonOutput.textContent = pretty;
-                jsonOutput.style.color = 'var(--success, #10b981)';
-                if (fixed !== raw) {
-                    jsonOutput.textContent = '/* ✓ Auto-fixed minor issues */\n' + pretty;
+                var res = await fetch('/api/hallucination', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ context: context, prompt: prompt, answer: answer })
+                });
+                var data = await res.json();
+                if (!res.ok) {
+                    output.innerHTML = '<div class="hallucination-error">' + escapeHtml(data.error || 'Analysis failed. Please try again.') + '</div>';
+                    return;
                 }
-            } catch (e) {
-                jsonOutput.textContent = '✗ ' + e.message + '\n\nMake sure your JSON is valid.\nExample: {"key": "value", "num": 42}';
-                jsonOutput.style.color = 'var(--danger, #ef4444)';
+                renderHallucinationReport(data, output);
+            } catch (err) {
+                output.innerHTML = '<div class="hallucination-error">Network error. Please try again.</div>';
+            } finally {
+                runBtn.disabled = false;
             }
         });
-    }
+    })();
 
-    if (jsonCopyBtn && jsonOutput) {
-        jsonCopyBtn.addEventListener('click', function () {
-            navigator.clipboard.writeText(jsonOutput.textContent);
-        });
-    }
+    function renderHallucinationReport(data, container) {
+        var hs = Math.round(data.hallucination_score || 0);
+        var fs = Math.round(data.faithfulness_score || 0);
+        var facts = data.facts || [];
+        var patterns = data.patterns || [];
+        var recommendations = data.recommendations || [];
 
-    if (jsonClearBtn && jsonInput && jsonOutput) {
-        jsonClearBtn.addEventListener('click', function () {
-            jsonInput.value = '';
-            jsonOutput.textContent = '';
-        });
+        var hsColor = hs <= 20 ? '#10b981' : hs <= 50 ? '#f59e0b' : '#ef4444';
+        var hsLabel = hs <= 20 ? 'Low Risk' : hs <= 50 ? 'Medium Risk' : 'High Risk';
+
+        var statusIcon = hs <= 20
+            ? '<i class="fas fa-circle-check" style="color:#10b981"></i>'
+            : hs <= 50
+            ? '<i class="fas fa-triangle-exclamation" style="color:#f59e0b"></i>'
+            : '<i class="fas fa-circle-xmark" style="color:#ef4444"></i>';
+
+        var factsHtml = facts.map(function (f) {
+            var icon = f.status === 'supported'
+                ? '<span class="hf-icon hf-supported"><i class="fas fa-circle-check"></i></span>'
+                : f.status === 'hallucinated'
+                ? '<span class="hf-icon hf-hallucinated"><i class="fas fa-circle-xmark"></i></span>'
+                : f.status === 'contradicted'
+                ? '<span class="hf-icon hf-contradicted"><i class="fas fa-triangle-exclamation"></i></span>'
+                : '<span class="hf-icon hf-unknown"><i class="fas fa-circle-question"></i></span>';
+            return '<div class="hf-row">' + icon +
+                '<div class="hf-content"><div class="hf-fact">' + escapeHtml(f.fact || '') + '</div>' +
+                (f.explanation ? '<div class="hf-explanation">' + escapeHtml(f.explanation) + '</div>' : '') +
+                '</div></div>';
+        }).join('');
+
+        var patternsHtml = patterns.length
+            ? patterns.map(function (p) { return '<span class="hf-pattern-tag">' + escapeHtml(p) + '</span>'; }).join('')
+            : '<span style="color:var(--text-dim);font-size:0.82rem">None detected</span>';
+
+        var recsHtml = recommendations.length
+            ? '<ul class="hf-recs">' + recommendations.map(function (r) { return '<li>' + escapeHtml(r) + '</li>'; }).join('') + '</ul>'
+            : '';
+
+        container.innerHTML =
+            '<div class="hallucination-report">' +
+                '<div class="hr-scores">' +
+                    '<div class="hr-score-card" style="--score-color:' + hsColor + '">' +
+                        '<div class="hr-score-value" style="color:' + hsColor + '">' + hs + '%</div>' +
+                        '<div class="hr-score-label">Hallucination Score</div>' +
+                        '<div class="hr-score-badge">' + statusIcon + ' ' + hsLabel + '</div>' +
+                    '</div>' +
+                    '<div class="hr-score-card" style="--score-color:#6366f1">' +
+                        '<div class="hr-score-value" style="color:#6366f1">' + fs + '%</div>' +
+                        '<div class="hr-score-label">Faithfulness Score</div>' +
+                        '<div class="hr-score-badge"><i class="fas fa-link" style="color:#6366f1"></i> Grounding</div>' +
+                    '</div>' +
+                    '<div class="hr-score-card hr-score-stats">' +
+                        '<div class="hr-stats-row"><span>' + facts.filter(function(f){return f.status==='supported';}).length + '</span><small>Supported</small></div>' +
+                        '<div class="hr-stats-row"><span style="color:#ef4444">' + facts.filter(function(f){return f.status==='hallucinated';}).length + '</span><small>Hallucinated</small></div>' +
+                        '<div class="hr-stats-row"><span style="color:#f59e0b">' + facts.filter(function(f){return f.status==='contradicted';}).length + '</span><small>Contradicted</small></div>' +
+                    '</div>' +
+                '</div>' +
+                (facts.length ? '<div class="hr-section"><div class="hr-section-title"><i class="fas fa-list-check"></i> Atomic Fact Breakdown</div>' + factsHtml + '</div>' : '') +
+                (patterns.length ? '<div class="hr-section"><div class="hr-section-title"><i class="fas fa-biohazard"></i> Detected Patterns</div><div class="hf-patterns">' + patternsHtml + '</div></div>' : '') +
+                (recsHtml ? '<div class="hr-section"><div class="hr-section-title"><i class="fas fa-lightbulb"></i> Recommendations</div>' + recsHtml + '</div>' : '') +
+            '</div>';
     }
 
     // ─── Newsletter ───

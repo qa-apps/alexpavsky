@@ -1855,6 +1855,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._handle_challenge()
         if self.path == "/api/attack-generator":
             return self._handle_attack_generator()
+        if self.path == "/api/hallucination":
+            return self._handle_hallucination()
         if self.path != "/api/chat":
             self._json(404, {"error": "not_found"})
             return
@@ -2574,6 +2576,156 @@ CRITICAL RULES:
             result["multi_turn"] = [str(t)[:2000] for t in result["multi_turn"][:8]]
 
         self._json(200, result)
+
+
+    # ─── RAG Hallucination Tester ───
+
+    HALLUCINATION_RATE = {}  # ip_hash -> (count, window_start)
+
+    HALLUCINATION_JUDGE_PROMPT = (
+        "You are an expert RAG (Retrieval-Augmented Generation) quality evaluator specializing in hallucination detection.\n\n"
+        "You will analyse an AI response and determine how faithfully it is grounded in the provided source context.\n\n"
+        "SOURCE CONTEXT (ground truth):\n{context}\n\n"
+        "USER PROMPT:\n{prompt}\n\n"
+        "AI RESPONSE TO EVALUATE:\n{answer}\n\n"
+        "Instructions:\n"
+        "1. Decompose the AI Response into individual atomic facts (each distinct claim or statement).\n"
+        "2. For each fact, determine if it is: 'supported' (clearly in context), 'hallucinated' (invented, not in context), "
+        "'contradicted' (conflicts with context), or 'unverifiable' (no context provided to check against).\n"
+        "3. Calculate hallucination_score = (hallucinated + contradicted facts / total facts) * 100, rounded to integer.\n"
+        "4. Calculate faithfulness_score = 100 - hallucination_score.\n"
+        "5. Identify common hallucination patterns from this list if present: "
+        "'fabricated citations', 'invented numbers', 'invented dates', 'wrong names', "
+        "'overconfident wording', 'contradictory statements', 'unsupported claims', "
+        "'missing uncertainty', 'context ignored', 'scope exaggeration'.\n"
+        "6. Provide 2-4 short actionable recommendations.\n\n"
+        "Respond ONLY with valid JSON, no markdown fences:\n"
+        '{{"hallucination_score": 0-100, "faithfulness_score": 0-100, '
+        '"total_facts": N, "hallucinated_count": N, '
+        '"facts": [{{"fact": "...", "status": "supported|hallucinated|contradicted|unverifiable", "explanation": "..."}}], '
+        '"patterns": ["..."], "recommendations": ["..."]}}'
+    )
+
+    def _check_hallucination_rate(self, ip_hash):
+        now = time.time()
+        entry = Handler.HALLUCINATION_RATE.get(ip_hash)
+        if not entry or now - entry[1] > 3600:
+            Handler.HALLUCINATION_RATE[ip_hash] = (1, now)
+            return True
+        if entry[0] >= 15:
+            return False
+        Handler.HALLUCINATION_RATE[ip_hash] = (entry[0] + 1, entry[1])
+        return True
+
+    def _handle_hallucination(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length > 131072:
+            self._json(413, {"error": "payload_too_large"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+
+        ip_hash = _hash_ip(self._client_ip())
+        if not self._check_hallucination_rate(ip_hash):
+            self._json(429, {"error": "rate_limit", "message": "Too many requests. Try again in an hour."})
+            return
+
+        context = _clean(body.get("context"), 8000) or "(no source context provided)"
+        prompt = _clean(body.get("prompt"), 2000) or "(no prompt provided)"
+        answer = _clean(body.get("answer"), 6000)
+
+        if not answer or not answer.strip():
+            self._json(400, {"error": "empty_answer", "message": "AI response is required."})
+            return
+
+        judge_input = self.HALLUCINATION_JUDGE_PROMPT.format(
+            context=context,
+            prompt=prompt,
+            answer=answer,
+        )
+
+        judge_model = _pick(TIER_H) or _pick(TIER_M) or CHAT_MODELS[0]
+        log.info("hallucination: judge=%s ip=%s", judge_model["label"], ip_hash[:8])
+
+        judge_reply, err = _call_model(
+            judge_model,
+            "You are a hallucination detection judge. Return ONLY valid JSON. No markdown, no explanation outside JSON.",
+            judge_input,
+            2048,
+        )
+
+        if not judge_reply or not judge_reply.strip():
+            chain = _get_fallback_chain(judge_model, "H")
+            for fb in chain[:4]:
+                judge_reply, err = _call_model(
+                    fb,
+                    "You are a hallucination detection judge. Return ONLY valid JSON. No markdown, no explanation outside JSON.",
+                    judge_input,
+                    2048,
+                )
+                if judge_reply and judge_reply.strip():
+                    judge_model = fb
+                    break
+                time.sleep(0.3)
+
+        if not judge_reply or not judge_reply.strip():
+            self._json(502, {"error": "judge_unavailable", "message": "Analysis service is temporarily unavailable. Try again."})
+            return
+
+        default = {
+            "hallucination_score": 0, "faithfulness_score": 100,
+            "total_facts": 0, "hallucinated_count": 0,
+            "facts": [], "patterns": [], "recommendations": [],
+        }
+
+        try:
+            cleaned = judge_reply.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```\w*\n?", "", cleaned)
+                cleaned = re.sub(r"\n?```$", "", cleaned)
+            first_brace = cleaned.find("{")
+            last_brace = cleaned.rfind("}")
+            if first_brace > 0 and last_brace > first_brace:
+                cleaned = cleaned[first_brace:last_brace + 1]
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict):
+                hs = max(0, min(100, int(parsed.get("hallucination_score", 0))))
+                fs = max(0, min(100, int(parsed.get("faithfulness_score", 100 - hs))))
+                facts_raw = parsed.get("facts", [])
+                facts = []
+                if isinstance(facts_raw, list):
+                    for f in facts_raw[:30]:
+                        if isinstance(f, dict):
+                            status = f.get("status", "unverifiable")
+                            if status not in ("supported", "hallucinated", "contradicted", "unverifiable"):
+                                status = "unverifiable"
+                            facts.append({
+                                "fact": str(f.get("fact", ""))[:300],
+                                "status": status,
+                                "explanation": str(f.get("explanation", ""))[:300],
+                            })
+                patterns = [str(p)[:80] for p in parsed.get("patterns", [])[:10] if isinstance(p, str)]
+                recs = [str(r)[:200] for r in parsed.get("recommendations", [])[:6] if isinstance(r, str)]
+                default = {
+                    "hallucination_score": hs,
+                    "faithfulness_score": fs,
+                    "total_facts": len(facts),
+                    "hallucinated_count": len([f for f in facts if f["status"] in ("hallucinated", "contradicted")]),
+                    "facts": facts,
+                    "patterns": patterns,
+                    "recommendations": recs,
+                    "judge_model": judge_model["label"],
+                }
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            log.warning("hallucination parse fail: %s | raw: %s", e, judge_reply[:200])
+
+        self._json(200, default)
 
 
 def _warmup_caches():
