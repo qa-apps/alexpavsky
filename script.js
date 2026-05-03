@@ -2115,6 +2115,7 @@
         var chatStop = document.getElementById('chat-stop');
         var chatClearInput = document.getElementById('chat-clear-input');
         var attachBtn = document.getElementById('chat-attach-btn');
+        var inlineAttachBtn = document.getElementById('chat-inline-attach');
         var micBtn = document.getElementById('chat-mic-btn');
         var fileInput = document.getElementById('chat-file-input');
         var attachmentsContainer = document.getElementById('chat-attachments');
@@ -2416,18 +2417,27 @@
             attachBtn.addEventListener('click', function () { fileInput.click(); });
             fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
         }
+        if (inlineAttachBtn && fileInput) {
+            inlineAttachBtn.addEventListener('click', function () { fileInput.click(); });
+        }
 
         var dropZone = chatWindow;
         if (dropZone) {
-            dropZone.addEventListener('dragover', function (e) { e.preventDefault(); if (chatInputContainer) chatInputContainer.classList.add('drag-over'); });
+            dropZone.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                if (chatInputContainer) chatInputContainer.classList.add('drag-over');
+                if (chatInputWrap) chatInputWrap.classList.add('drag-over');
+            });
             dropZone.addEventListener('dragleave', function (e) {
                 if (!dropZone.contains(e.relatedTarget)) {
                     if (chatInputContainer) chatInputContainer.classList.remove('drag-over');
+                    if (chatInputWrap) chatInputWrap.classList.remove('drag-over');
                 }
             });
             dropZone.addEventListener('drop', function (e) {
                 e.preventDefault();
                 if (chatInputContainer) chatInputContainer.classList.remove('drag-over');
+                if (chatInputWrap) chatInputWrap.classList.remove('drag-over');
                 if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
             });
         }

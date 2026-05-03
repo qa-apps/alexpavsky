@@ -210,36 +210,37 @@
                 <button class="tool-strip-card" style="--c:#ef4444" onclick="document.getElementById('open-attackgen-btn').click()">
                     <div class="tool-strip-icon"><i class="fas fa-crosshairs"></i></div>
                     <div class="tool-strip-info">
-                        <span class="tool-strip-name">Attack Generator</span>
-                        <span class="tool-strip-desc">Generate adversarial prompts and attack scenarios.</span>
+                        <span class="tool-strip-name">Adversarial Simulation</span>
+                        <span class="tool-strip-desc">Stress-test your AI with realistic attack scenarios.</span>
                     </div>
-                    <span class="tool-strip-arrow" style="color:#ef4444">Generate →</span>
+                    <span class="tool-strip-arrow" style="color:#ef4444">Explore →</span>
                 </button>
                 <button class="tool-strip-card" style="--c:#a855f7" onclick="document.getElementById('open-pitest-btn').click()">
                     <div class="tool-strip-icon"><i class="fas fa-shield-virus"></i></div>
                     <div class="tool-strip-info">
-                        <span class="tool-strip-name">Prompt Injection Test</span>
-                        <span class="tool-strip-desc">Detect and test prompt injection vulnerabilities.</span>
+                        <span class="tool-strip-name">Injection Risk Scanner</span>
+                        <span class="tool-strip-desc">Check if prompts are vulnerable to hidden injections.</span>
                     </div>
-                    <span class="tool-strip-arrow" style="color:#a855f7">Test Now →</span>
+                    <span class="tool-strip-arrow" style="color:#a855f7">Scan →</span>
                 </button>
                 <button class="tool-strip-card" style="--c:#22c55e" onclick="document.getElementById('open-hallucination-btn').click()">
                     <div class="tool-strip-icon"><i class="fas fa-microscope"></i></div>
                     <div class="tool-strip-info">
-                        <span class="tool-strip-name">RAG Tester</span>
-                        <span class="tool-strip-desc">Check if your AI is grounded in the provided context.</span>
+                        <span class="tool-strip-name">Grounding & Retrieval QA</span>
+                        <span class="tool-strip-desc">See if RAG answers stay connected to source docs.</span>
                     </div>
-                    <span class="tool-strip-arrow" style="color:#22c55e">Test RAG →</span>
+                    <span class="tool-strip-arrow" style="color:#22c55e">Verify →</span>
                 </button>
                 <button class="tool-strip-card" style="--c:#f59e0b" onclick="document.getElementById('open-hallucination-btn').click()">
                     <div class="tool-strip-icon"><i class="fas fa-brain"></i></div>
                     <div class="tool-strip-info">
-                        <span class="tool-strip-name">Hallucination Tester</span>
-                        <span class="tool-strip-desc">Find hallucinations and unreliable responses.</span>
+                        <span class="tool-strip-name">Reliability & Fact Check</span>
+                        <span class="tool-strip-desc">Flag hallucinations and unsupported AI claims.</span>
                     </div>
-                    <span class="tool-strip-arrow" style="color:#f59e0b">Test Hallucination →</span>
+                    <span class="tool-strip-arrow" style="color:#f59e0b">Check →</span>
                 </button>
             </div>
+            <p class="tools-strip-hint">Explore detailed tools in the <a href="#lab">AI Lab</a> below ↓</p>
         </div>
     </header>
 
@@ -426,39 +427,39 @@
                     <i class="fas fa-flask-vial"></i> Lab
                 </div>
                 <h2 class="section-title">AI Lab</h2>
-                <p class="section-desc">Quick utilities and experiments. More coming soon.</p>
+                <p class="section-desc">Hands-on testing tools & experiments for builders.</p>
             </div>
             <div class="lab-grid">
                 <div class="lab-card" data-animate>
                     <div class="lab-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
-                    <h3>AI Assistant</h3>
-                    <p>Chat with an AI that knows about QA, testing, and AI safety. Powered by open-source models.</p>
+                    <h3>AI Chat Lab</h3>
+                    <p>Chat with an AI expert on QA, testing, and AI safety. Powered by multi-model orchestration.</p>
                     <button class="btn btn-primary btn-sm" id="open-chat-btn">
                         <i class="fas fa-message"></i> Open Chat
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
                     <div class="lab-icon" style="color:#a855f7"><i class="fas fa-microscope"></i></div>
-                    <h3>RAG Hallucination Tester</h3>
-                    <p>Paste your source context, prompt and AI response. Get a Hallucination Score with atomic fact analysis.</p>
+                    <h3>RAG Hallucination Analyzer</h3>
+                    <p>Paste context + response. Get atomic fact-level breakdown and hallucination score 0–100%.</p>
                     <button class="btn btn-glass btn-sm" id="open-hallucination-btn">
                         <i class="fas fa-microscope"></i> Run Analysis
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
                     <div class="lab-icon" style="color:#f59e0b"><i class="fas fa-bug"></i></div>
-                    <h3>Prompt Injection Test</h3>
-                    <p>Scan prompts and AI outputs for hidden Unicode, invisible characters, and injection patterns.</p>
+                    <h3>Prompt Injection Scanner</h3>
+                    <p>Scan for hidden Unicode, homoglyphs, control characters and injection patterns in prompts.</p>
                     <button class="btn btn-glass btn-sm" id="open-pitest-btn">
                         <i class="fas fa-shield-virus"></i> Scan Prompt
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
                     <div class="lab-icon" style="color:#ef4444"><i class="fas fa-crosshairs"></i></div>
-                    <h3>Attack Generator</h3>
-                    <p>Generate realistic adversarial prompts for AI red teaming. Pick industry, target, attack type, severity — get production-grade payloads.</p>
+                    <h3>Attack Scenario Builder</h3>
+                    <p>Configure industry, target, attack type, severity — get production-grade adversarial payloads.</p>
                     <button class="btn btn-glass btn-sm" id="open-attackgen-btn">
-                        <i class="fas fa-bolt"></i> Generate
+                        <i class="fas fa-bolt"></i> Build Scenario
                     </button>
                 </div>
                 <div class="lab-card challenge-card" id="challenge" data-animate>
@@ -767,6 +768,10 @@
                     </button>
                     <div class="chat-input-wrap">
                         <input type="text" id="chat-input" class="chat-input" placeholder="Type your message..." autocomplete="off">
+                        <button type="button" id="chat-inline-attach" class="chat-drop-hint" aria-label="Attach or drop files" title="Attach or drop files">
+                            <i class="fas fa-paperclip"></i>
+                            <span>Drag file here</span>
+                        </button>
                         <div class="chat-voice-meter" aria-hidden="true">
                             <span class="chat-voice-meter-wave"></span>
                         </div>

@@ -773,6 +773,22 @@ img { max-width: 100%; display: block; }
     transform: translateX(4px);
 }
 
+.tools-strip-hint {
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin: 0.85rem 0 0;
+    letter-spacing: 0.01em;
+}
+.tools-strip-hint a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+}
+.tools-strip-hint a:hover {
+    text-decoration: underline;
+}
+
 .terminal-header {
     display: flex;
     align-items: center;
@@ -1928,19 +1944,24 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     box-shadow: 0 0 20px rgba(99,102,241,0.2);
 }
 .lab-card:nth-child(2) .lab-icon {
+    background: linear-gradient(135deg, rgba(168,85,247,0.25), rgba(139,92,246,0.18));
+    color: #a855f7;
+    box-shadow: 0 0 20px rgba(168,85,247,0.2);
+}
+.lab-card:nth-child(3) .lab-icon {
     background: linear-gradient(135deg, rgba(245,158,11,0.25), rgba(239,68,68,0.18));
     color: #f59e0b;
     box-shadow: 0 0 20px rgba(245,158,11,0.2);
 }
-.lab-card:nth-child(3) .lab-icon {
+.lab-card:nth-child(4) .lab-icon {
+    background: linear-gradient(135deg, rgba(239,68,68,0.25), rgba(245,158,11,0.18));
+    color: #ef4444;
+    box-shadow: 0 0 20px rgba(239,68,68,0.2);
+}
+.lab-card:nth-child(5) .lab-icon {
     background: linear-gradient(135deg, rgba(16,185,129,0.25), rgba(6,182,212,0.18));
     color: #10b981;
     box-shadow: 0 0 20px rgba(16,185,129,0.2);
-}
-.lab-card:nth-child(4) .lab-icon {
-    background: linear-gradient(135deg, rgba(168,85,247,0.25), rgba(236,72,153,0.18));
-    color: #a855f7;
-    box-shadow: 0 0 20px rgba(168,85,247,0.2);
 }
 @keyframes labIconPulse {
     0%, 100% { transform: scale(1); }
@@ -3304,16 +3325,58 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .chat-input {
     width: 100%; background: var(--bg-primary); border: 1px solid var(--border);
-    border-radius: 20px; padding: 0.6rem 3.2rem 0.9rem 1rem;
+    border-radius: 20px; padding: 0.6rem 8.8rem 0.9rem 1rem;
     color: var(--text-primary); font-size: 0.85rem; font-family: var(--font);
     outline: none; transition: var(--transition);
 }
 .chat-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
 .chat-input::placeholder { color: var(--text-dim); }
+.chat-drop-hint {
+    position: absolute;
+    top: 50%;
+    right: 0.55rem;
+    transform: translateY(-50%);
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 0.62rem;
+    border: 1px solid rgba(99,102,241,0.22);
+    border-radius: 999px;
+    background: rgba(99,102,241,0.08);
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: opacity 0.18s ease, transform 0.18s ease, border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+.chat-drop-hint:hover {
+    color: var(--text-primary);
+    border-color: rgba(99,102,241,0.45);
+    background: rgba(99,102,241,0.16);
+}
+.chat-input:not(:placeholder-shown) ~ .chat-drop-hint,
+.chat-input-wrap.listening .chat-drop-hint,
+.chat-input-wrap:has(.chat-stop-btn.visible) .chat-drop-hint {
+    opacity: 0;
+    pointer-events: none;
+}
+.chat-input-wrap.drag-over .chat-input {
+    border-color: var(--accent);
+    background: rgba(99,102,241,0.1);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.22), 0 0 24px rgba(99,102,241,0.16);
+}
+.chat-input-wrap.drag-over .chat-drop-hint {
+    color: #fff;
+    border-color: rgba(76,201,240,0.55);
+    background: linear-gradient(135deg, rgba(99,102,241,0.45), rgba(6,182,212,0.38));
+    transform: translateY(-50%) scale(1.03);
+}
 .chat-voice-meter {
     position: absolute;
     left: 1rem;
-    right: 3.2rem;
+    right: 8.8rem;
     bottom: 0.42rem;
     height: 10px;
     display: flex;
@@ -3413,6 +3476,10 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
     .lab-grid { grid-template-columns: repeat(2, 1fr); }
 
     .chat-window { width: calc(100vw - 40px); right: -10px; }
+    .chat-input { padding-right: 5.2rem; }
+    .chat-drop-hint { width: 28px; padding: 0; justify-content: center; }
+    .chat-drop-hint span { display: none; }
+    .chat-voice-meter { right: 5.2rem; }
 
     .footer-inner { flex-direction: column; text-align: center; }
 }
