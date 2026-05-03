@@ -1321,68 +1321,172 @@
 
         // Hidden / invisible Unicode code points
         var INVISIBLE_CHARS = [
-            { cp: 0x200B, name: 'Zero-Width Space',          risk: 'high' },
-            { cp: 0x200C, name: 'Zero-Width Non-Joiner',     risk: 'high' },
-            { cp: 0x200D, name: 'Zero-Width Joiner',         risk: 'high' },
-            { cp: 0x200E, name: 'Left-to-Right Mark',        risk: 'medium' },
-            { cp: 0x200F, name: 'Right-to-Left Mark',        risk: 'medium' },
-            { cp: 0x202A, name: 'LTR Embedding',             risk: 'high' },
-            { cp: 0x202B, name: 'RTL Embedding',             risk: 'high' },
-            { cp: 0x202C, name: 'Pop Directional Format',    risk: 'medium' },
-            { cp: 0x202D, name: 'LTR Override',              risk: 'high' },
-            { cp: 0x202E, name: 'RTL Override (Trojan src)', risk: 'critical' },
-            { cp: 0x2060, name: 'Word Joiner',               risk: 'medium' },
-            { cp: 0x2061, name: 'Function Application',      risk: 'low' },
-            { cp: 0x2062, name: 'Invisible Times',           risk: 'low' },
-            { cp: 0x2063, name: 'Invisible Separator',       risk: 'medium' },
-            { cp: 0x2064, name: 'Invisible Plus',            risk: 'low' },
-            { cp: 0xFEFF, name: 'BOM / Zero-Width No-Break', risk: 'medium' },
-            { cp: 0x00AD, name: 'Soft Hyphen',               risk: 'low' },
-            { cp: 0x034F, name: 'Combining Grapheme Joiner', risk: 'medium' },
-            { cp: 0x115F, name: 'Hangul Choseong Filler',    risk: 'medium' },
-            { cp: 0x1160, name: 'Hangul Jungseong Filler',   risk: 'medium' },
-            { cp: 0x3164, name: 'Hangul Filler',             risk: 'medium' },
-            { cp: 0xFFA0, name: 'Halfwidth Hangul Filler',   risk: 'medium' },
+            { cp: 0x200B, name: 'Zero-Width Space',                risk: 'high' },
+            { cp: 0x200C, name: 'Zero-Width Non-Joiner',           risk: 'high' },
+            { cp: 0x200D, name: 'Zero-Width Joiner',               risk: 'high' },
+            { cp: 0x200E, name: 'Left-to-Right Mark',              risk: 'medium' },
+            { cp: 0x200F, name: 'Right-to-Left Mark',              risk: 'medium' },
+            { cp: 0x202A, name: 'LTR Embedding',                   risk: 'high' },
+            { cp: 0x202B, name: 'RTL Embedding',                   risk: 'high' },
+            { cp: 0x202C, name: 'Pop Directional Format',          risk: 'medium' },
+            { cp: 0x202D, name: 'LTR Override',                    risk: 'high' },
+            { cp: 0x202E, name: 'RTL Override (Trojan Source)',     risk: 'critical' },
+            { cp: 0x2060, name: 'Word Joiner',                     risk: 'medium' },
+            { cp: 0x2061, name: 'Function Application',            risk: 'low' },
+            { cp: 0x2062, name: 'Invisible Times',                 risk: 'low' },
+            { cp: 0x2063, name: 'Invisible Separator',             risk: 'medium' },
+            { cp: 0x2064, name: 'Invisible Plus',                  risk: 'low' },
+            { cp: 0xFEFF, name: 'BOM / Zero-Width No-Break',       risk: 'medium' },
+            { cp: 0x00AD, name: 'Soft Hyphen',                     risk: 'low' },
+            { cp: 0x034F, name: 'Combining Grapheme Joiner',       risk: 'medium' },
+            { cp: 0x115F, name: 'Hangul Choseong Filler',          risk: 'medium' },
+            { cp: 0x1160, name: 'Hangul Jungseong Filler',         risk: 'medium' },
+            { cp: 0x3164, name: 'Hangul Filler',                   risk: 'medium' },
+            { cp: 0xFFA0, name: 'Halfwidth Hangul Filler',         risk: 'medium' },
+            // Variation Selectors (used to smuggle hidden data)
+            { cp: 0xFE00, name: 'Variation Selector-1',            risk: 'high' },
+            { cp: 0xFE01, name: 'Variation Selector-2',            risk: 'high' },
+            { cp: 0xFE0F, name: 'Variation Selector-16 (VS16)',    risk: 'high' },
+            // Interlinear Annotation
+            { cp: 0xFFF9, name: 'Interlinear Annotation Anchor',   risk: 'medium' },
+            { cp: 0xFFFA, name: 'Interlinear Annotation Separator',risk: 'medium' },
+            { cp: 0xFFFB, name: 'Interlinear Annotation Terminator',risk:'medium' },
         ];
 
-        // Prompt injection text patterns
+        // Unicode Tags block (U+E0000–U+E007F) — #1 most abused invisible block in 2025
+        // Each tag char is invisible and can encode arbitrary text in prompts
+        function detectUnicodeTags(text) {
+            var found = [];
+            var tagChars = [];
+            for (var i = 0; i < text.length; i++) {
+                var cp = text.codePointAt(i);
+                if (cp >= 0xE0000 && cp <= 0xE007F) {
+                    tagChars.push('U+' + cp.toString(16).toUpperCase());
+                    if (cp > 0xFFFF) i++; // surrogate pair
+                }
+            }
+            if (tagChars.length > 0) {
+                found.push({
+                    label: 'Unicode Tags Block (U+E0000–U+E007F) — ' + tagChars.length + ' chars',
+                    detail: 'Invisible tag chars detected. Often used to embed hidden instructions invisible to humans. Chars: ' + tagChars.slice(0,8).join(', ') + (tagChars.length > 8 ? '…' : ''),
+                    risk: 'critical'
+                });
+            }
+            return found;
+        }
+
+        // Mathematical Alphanumeric Symbols (U+1D400+) — look like normal text but different codepoints
+        function detectMathAlpha(text) {
+            var count = 0;
+            for (var i = 0; i < text.length; i++) {
+                var cp = text.codePointAt(i);
+                if (cp >= 0x1D400 && cp <= 0x1D7FF) { count++; if (cp > 0xFFFF) i++; }
+            }
+            if (count > 2) return [{ label: 'Mathematical Alphanumeric Symbols (' + count + ' chars)', detail: 'Chars from U+1D400+ block — visually identical to ASCII but different codepoints. Used in homoglyph attacks.', risk: 'high' }];
+            return [];
+        }
+
+        // Prompt injection patterns — 45+ patterns
         var INJECTION_PATTERNS = [
+            // Classic ignore/disregard
             { re: /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|guidelines?)/i, label: 'Ignore previous instructions', risk: 'critical' },
-            { re: /disregard\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)/i,                  label: 'Disregard instructions',      risk: 'critical' },
+            { re: /disregard\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)/i,                   label: 'Disregard instructions',      risk: 'critical' },
             { re: /forget\s+(everything|all|your|previous|prior)/i,                                                    label: 'Forget previous context',     risk: 'high' },
-            { re: /you\s+are\s+now\s+(a|an|the)\s+/i,                                                                  label: 'Role reassignment attempt',   risk: 'high' },
+            { re: /override\s+(all\s+)?(previous|prior|your|safety|content)?\s*(instructions?|rules?|filters?|guardrails?|restrictions?|policy)/i, label: 'Override instructions/safety', risk: 'critical' },
+            { re: /bypass\s+(safety|filter|guardrail|restriction|content\s+policy|rule)/i,                             label: 'Bypass safety/filter',        risk: 'critical' },
+            { re: /disable\s+(safety|filter|guardrail|content|restriction)/i,                                          label: 'Disable safety filter',       risk: 'critical' },
+            { re: /turn\s+off\s+(safety|filter|guardrail|content\s+filter)/i,                                          label: 'Turn off safety filters',     risk: 'critical' },
+            // Role/persona injection
+            { re: /you\s+are\s+now\s+(a|an|the)\s+/i,                                                                 label: 'Role reassignment attempt',   risk: 'high' },
             { re: /your\s+(new\s+)?(role|persona|identity|instructions?)\s+(is|are)/i,                                 label: 'New role/persona injection',  risk: 'high' },
             { re: /act\s+as\s+(if\s+you\s+are|a|an)\s+/i,                                                             label: 'Act-as persona jailbreak',    risk: 'high' },
-            { re: /\[SYSTEM\]|\<\|system\|\>|<<SYS>>|###\s*System:/i,                                                 label: 'Fake system prompt tag',      risk: 'critical' },
-            { re: /\bDAN\b|\bJailbreak\b|\bjailbroken\b/i,                                                            label: 'DAN / Jailbreak keyword',     risk: 'high' },
-            { re: /repeat\s+(the\s+)?(above|following|everything|all|this)\s+(back|text|word)/i,                       label: 'Data extraction via repeat',  risk: 'high' },
-            { re: /print\s+(your\s+)?(system\s+prompt|instructions?|prompt|config)/i,                                  label: 'Prompt leak attempt',         risk: 'critical' },
-            { re: /reveal\s+(your\s+)?(system\s+prompt|instructions?|rules?|training)/i,                               label: 'Training data extraction',    risk: 'critical' },
-            { re: /translate\s+(this|the\s+above|everything)\s+to/i,                                                   label: 'Translation exfiltration',    risk: 'medium' },
+            { re: /pretend\s+(to\s+be|you\s+are|that\s+you)/i,                                                        label: 'Pretend-to-be persona',       risk: 'high' },
+            { re: /roleplay\s+as|play\s+the\s+role\s+of|you\s+are\s+playing/i,                                        label: 'Roleplay persona injection',  risk: 'high' },
+            { re: /developer\s+mode|god\s+mode|jailbreak\s+mode|unrestricted\s+mode|admin\s+mode|maintenance\s+mode/i,label: 'Special mode activation',     risk: 'critical' },
+            { re: /system\s+override|emergency\s+override|security\s+bypass/i,                                        label: 'System/security override',    risk: 'critical' },
+            // Fake system prompt tags
+            { re: /\[SYSTEM\]|<\|system\|>|<<SYS>>|###\s*System:|<system>|<\/system>|\[INST\]|\[\/INST\]/i,          label: 'Fake system prompt tag',      risk: 'critical' },
+            // DAN / Jailbreak keywords
+            { re: /\bDAN\b|\bJailbreak\b|\bjailbroken\b|\bdo\s+anything\s+now\b/i,                                    label: 'DAN / Jailbreak keyword',     risk: 'high' },
+            // Prompt leak attempts
+            { re: /print\s+(your\s+)?(system\s+prompt|instructions?|prompt|config)/i,                                  label: 'Prompt leak — print',         risk: 'critical' },
+            { re: /reveal\s+(your\s+)?(system\s+prompt|instructions?|rules?|training)/i,                               label: 'Prompt leak — reveal',        risk: 'critical' },
+            { re: /(show|display|output|list|dump|tell\s+me|what\s+(are|is))\s+(your\s+)?(system\s+prompt|instructions?|rules?\s+you\s+follow|internal\s+instructions?)/i, label: 'Prompt leak — show/list/what are', risk: 'critical' },
+            { re: /what\s+(were\s+you|are\s+you)\s+(told|instructed|trained|programmed|configured)/i,                  label: 'Training data extraction',    risk: 'high' },
+            { re: /repeat\s+(the\s+)?(above|everything|all|this|your\s+instructions?)\s+(back|verbatim|word)/i,        label: 'Data extraction via repeat',  risk: 'high' },
+            // Fictional framing (semantic bypass)
+            { re: /write\s+a\s+(story|novel|fiction|roleplay|scenario|scene)\s+(where|in\s+which)\s+(you|the\s+AI|a\s+character)/i, label: 'Fictional framing bypass',   risk: 'high' },
+            { re: /imagine\s+(you\s+are|you're|yourself\s+as)\s+(a|an)\s+/i,                                          label: 'Imaginative persona bypass',  risk: 'high' },
+            { re: /hypothetically\s+(speaking|if\s+you|you\s+could)/i,                                                 label: 'Hypothetical framing',        risk: 'medium' },
+            { re: /for\s+(educational|research|academic|fictional)\s+purposes/i,                                        label: 'False educational framing',   risk: 'medium' },
+            // Obfuscation
             { re: /\bbase64\b.*\bdecode\b|\bdecode\b.*\bbase64\b/i,                                                    label: 'Base64 decode instruction',   risk: 'high' },
+            { re: /[A-Za-z0-9+/]{40,}={0,2}/,                                                                         label: 'Possible base64 payload (40+ chars)', risk: 'high' },
+            { re: /(\\x[0-9a-fA-F]{2}){4,}/,                                                                          label: 'Hex-encoded payload (\\xNN)',  risk: 'high' },
+            { re: /(0x[0-9a-fA-F]{2}\s*){4,}/i,                                                                       label: 'Hex sequence (0xNN pattern)', risk: 'medium' },
+            { re: /(%[0-9a-fA-F]{2}){3,}/,                                                                             label: 'URL-encoded payload (%XX)',   risk: 'high' },
+            { re: /r0t13|rot-13|caesar\s+cipher|shift\s+\d+/i,                                                        label: 'ROT13/Caesar cipher mention', risk: 'medium' },
+            // Agentic / tool-use attacks
+            { re: /use\s+(the\s+)?(tool|function|plugin|api|endpoint)\s+(to\s+)?(send|post|delete|execute|run)/i,      label: 'Agentic tool-use attack',     risk: 'high' },
+            { re: /call\s+(function|method|api|tool)\s+/i,                                                              label: 'Function call injection',     risk: 'high' },
+            { re: /execute\s+(command|shell|script|code|system\s+call)/i,                                               label: 'Command execution attempt',   risk: 'critical' },
+            // Data exfiltration via URLs/images
+            { re: /!\[.*?\]\(https?:\/\/[^\s)]+\?[^\s)]*=(.*?)\)/,                                                     label: 'Markdown image exfiltration URL', risk: 'critical' },
+            { re: /https?:\/\/[^\s]+\?[^\s]*=(document|data|prompt|secret|key|token)/i,                                label: 'Possible data exfiltration URL', risk: 'high' },
+            // Multilingual injections (Russian)
+            { re: /игнорируй\s+(все\s+)?(предыдущие|прошлые|ваши)\s+(инструкции|правила|указания)/i,                  label: '[RU] Ignore instructions (Russian)', risk: 'critical' },
+            { re: /забудь\s+(все|об?\s+всем|предыдущие\s+инструкции)/i,                                                label: '[RU] Forget instructions (Russian)', risk: 'high' },
+            { re: /ты\s+теперь\s+(являешься|это|выступаешь)/i,                                                        label: '[RU] Role reassignment (Russian)', risk: 'high' },
+            { re: /притворись\s+(что\s+ты|будто\s+ты)/i,                                                               label: '[RU] Pretend-to-be (Russian)', risk: 'high' },
+            // HTML/XML/JSON indirect injection
             { re: /<!--[\s\S]*?-->/,                                                                                    label: 'HTML comment (hidden text)',  risk: 'medium' },
+            { re: /<\?xml[\s\S]*?\?>/i,                                                                                label: 'XML processing instruction', risk: 'medium' },
+            { re: /\{\s*"?role"?\s*:\s*"?system"?/i,                                                                   label: 'JSON system role injection',  risk: 'critical' },
+            // Payload splitting
+            { re: /(\b\w+\s*=\s*["']?\w+["']?\s*[,;]\s*){2,}.*\b(execute|run|eval|combine|concat|join)\b/i,           label: 'Payload splitting / variable reassembly', risk: 'high' },
+            // Context / privilege
             { re: /\bsudo\b|\broot\b.*\baccess\b|\badmin\b.*\bmode\b/i,                                                label: 'Privilege escalation phrase', risk: 'medium' },
             { re: /\btoken\b.*\blimit\b|\bcontext\b.*\bwindow\b.*\boverflow\b/i,                                       label: 'Context overflow attempt',    risk: 'medium' },
+            { re: /translate\s+(this|the\s+above|everything)\s+to/i,                                                    label: 'Translation exfiltration',   risk: 'medium' },
         ];
 
-        // Homoglyph / lookalike character ranges (Cyrillic, Greek, etc. that look like Latin)
+
+        // Homoglyph / lookalike characters — 60+ pairs
         function detectHomoglyphs(text) {
             var hits = [];
             var LATIN_LOOKALIKES = {
-                '\u0430': 'а→a (Cyrillic)', '\u0435': 'е→e (Cyrillic)', '\u043E': 'о→o (Cyrillic)',
-                '\u0440': 'р→p (Cyrillic)', '\u0441': 'с→c (Cyrillic)', '\u0445': 'х→x (Cyrillic)',
-                '\u0456': 'і→i (Cyrillic)', '\u04CF': 'ӏ→l (Cyrillic)', '\u0391': 'Α→A (Greek)',
-                '\u0395': 'Ε→E (Greek)',    '\u0397': 'Η→H (Greek)',    '\u0399': 'Ι→I (Greek)',
-                '\u039A': 'Κ→K (Greek)',    '\u039C': 'Μ→M (Greek)',    '\u039D': 'Ν→N (Greek)',
-                '\u039F': 'Ο→O (Greek)',    '\u03A1': 'Ρ→P (Greek)',    '\u03A4': 'Τ→T (Greek)',
-                '\u03A5': 'Υ→Y (Greek)',    '\u03A7': 'Χ→X (Greek)',
+                // Cyrillic
+                '\u0430':'а→a','\u0435':'е→e','\u043E':'о→o','\u0440':'р→p','\u0441':'с→c','\u0445':'х→x',
+                '\u0456':'і→i','\u04CF':'ӏ→l','\u0455':'ѕ→s','\u0439':'й→ñ','\u043C':'м→m',
+                '\u0410':'А→A','\u0412':'В→B','\u0415':'Е→E','\u041A':'К→K','\u041C':'М→M',
+                '\u041D':'Н→H','\u041E':'О→O','\u0420':'Р→P','\u0421':'С→C','\u0422':'Т→T',
+                '\u0425':'Х→X','\u0443':'у→y','\u0492':'Ғ→F (Kazakh)',
+                // Greek
+                '\u0391':'Α→A','\u0392':'Β→B','\u0395':'Ε→E','\u0396':'Ζ→Z','\u0397':'Η→H',
+                '\u0399':'Ι→I','\u039A':'Κ→K','\u039C':'Μ→M','\u039D':'Ν→N','\u039F':'Ο→O',
+                '\u03A1':'Ρ→P','\u03A4':'Τ→T','\u03A5':'Υ→Y','\u03A7':'Χ→X',
+                '\u03B1':'α→a','\u03BF':'ο→o','\u03C1':'ρ→p','\u03C5':'υ→u','\u03BD':'ν→v',
+                // Armenian
+                '\u0570':'հ→h','\u0578':'ո→o','\u0582':'ւ→u','\u0585':'օ→o',
+                // Fullwidth Latin (looks identical to ASCII)
+                '\uFF21':'Ａ→A','\uFF22':'Ｂ→B','\uFF23':'Ｃ→C','\uFF25':'Ｅ→E',
+                '\uFF26':'Ｆ→F','\uFF27':'Ｇ→G','\uFF28':'Ｈ→H','\uFF29':'Ｉ→I',
+                '\uFF2A':'Ｊ→J','\uFF2B':'Ｋ→K','\uFF2C':'Ｌ→L','\uFF2D':'Ｍ→M',
+                '\uFF2E':'Ｎ→N','\uFF2F':'Ｏ→O','\uFF30':'Ｐ→P','\uFF31':'Ｑ→Q',
+                '\uFF32':'Ｒ→R','\uFF33':'Ｓ→S','\uFF34':'Ｔ→T','\uFF35':'Ｕ→U',
+                '\uFF36':'Ｖ→V','\uFF37':'Ｗ→W','\uFF38':'Ｘ→X','\uFF39':'Ｙ→Y',
+                '\uFF3A':'Ｚ→Z',
+                '\uFF41':'ａ→a','\uFF42':'ｂ→b','\uFF43':'ｃ→c','\uFF45':'ｅ→e',
+                '\uFF4F':'ｏ→o','\uFF50':'ｐ→p','\uFF53':'ｓ→s','\uFF54':'ｔ→t',
+                '\uFF58':'ｘ→x',
             };
             for (var i = 0; i < text.length; i++) {
                 var ch = text[i];
-                if (LATIN_LOOKALIKES[ch]) hits.push({ ch: ch, info: LATIN_LOOKALIKES[ch], pos: i });
+                if (LATIN_LOOKALIKES[ch]) hits.push({ ch: ch, info: LATIN_LOOKALIKES[ch] + ' (Homoglyph)', pos: i });
             }
             return hits;
         }
+
 
         // ── Render helpers ──────────────────────────────────────────────────
         function escH(s) {
@@ -1413,58 +1517,59 @@
                 return;
             }
 
+            // NFKC normalization check: if normalized text differs significantly, flag it
+            var normalized = text.normalize ? text.normalize('NFKC') : text;
+            var normDiff = [];
+            if (normalized !== text) {
+                normDiff.push({ label: 'Text normalizes differently under NFKC', detail: 'Original length: ' + text.length + ' → Normalized: ' + normalized.length + ' chars. Indicates obfuscated/lookalike characters.', risk: 'high' });
+            }
+
+            // Obfuscation: high non-ASCII ratio
+            var nonAscii = (text.match(/[^\x00-\x7F]/g) || []).length;
+            var nonAsciiRatio = nonAscii / text.length;
+            if (nonAsciiRatio > 0.35 && text.length > 30) {
+                normDiff.push({ label: 'High non-ASCII ratio: ' + Math.round(nonAsciiRatio * 100) + '%', detail: nonAscii + ' of ' + text.length + ' chars are non-ASCII. Possible obfuscated/encoded content.', risk: 'medium' });
+            }
+
             var invisibleFound = [];
             INVISIBLE_CHARS.forEach(function(def) {
                 var ch = String.fromCodePoint(def.cp);
                 var count = (text.split(ch).length - 1);
                 if (count > 0) {
-                    invisibleFound.push({
-                        label: def.name + ' — U+' + def.cp.toString(16).toUpperCase().padStart(4,'0'),
-                        detail: 'Found ' + count + ' occurrence(s)',
-                        risk: def.risk
-                    });
+                    invisibleFound.push({ label: def.name + ' — U+' + def.cp.toString(16).toUpperCase().padStart(4,'0'), detail: 'Found ' + count + ' occurrence(s)', risk: def.risk });
                 }
             });
+            // Unicode Tags + Math Alpha
+            var unicodeTagsFound = detectUnicodeTags(text);
+            var mathAlphaFound   = detectMathAlpha(text);
+            invisibleFound = invisibleFound.concat(unicodeTagsFound).concat(mathAlphaFound);
 
             var injectionFound = [];
             INJECTION_PATTERNS.forEach(function(pat) {
                 var m = text.match(pat.re);
-                if (m) {
-                    injectionFound.push({
-                        label: pat.label,
-                        detail: 'Matched: "' + escH(m[0].substring(0, 80)) + '"',
-                        risk: pat.risk
-                    });
-                }
+                if (m) injectionFound.push({ label: pat.label, detail: 'Matched: "' + escH(m[0].substring(0, 80)) + '"', risk: pat.risk });
             });
 
             var homoglyphs = detectHomoglyphs(text);
             var homoglyphFound = [];
             var seen = {};
             homoglyphs.forEach(function(h) {
-                if (!seen[h.ch]) {
-                    seen[h.ch] = true;
-                    homoglyphFound.push({ label: 'Homoglyph: ' + h.info, detail: 'At position ' + h.pos, risk: 'high' });
-                }
+                if (!seen[h.ch]) { seen[h.ch] = true; homoglyphFound.push({ label: 'Homoglyph: ' + h.info, detail: 'At position ' + h.pos, risk: 'high' }); }
             });
 
-            // Non-printable ASCII control chars (except \n \r \t)
+            // Control chars
             var controlFound = [];
             var controlRe = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
-            var cm;
-            var controlSeen = {};
+            var cm; var controlSeen = {};
             while ((cm = controlRe.exec(text)) !== null) {
                 var cp = cm[0].charCodeAt(0);
-                if (!controlSeen[cp]) {
-                    controlSeen[cp] = true;
-                    controlFound.push({ label: 'Control char U+' + cp.toString(16).toUpperCase().padStart(4,'0'), detail: 'Non-printable ASCII', risk: 'medium' });
-                }
+                if (!controlSeen[cp]) { controlSeen[cp] = true; controlFound.push({ label: 'Control char U+' + cp.toString(16).toUpperCase().padStart(4,'0'), detail: 'Non-printable ASCII control character', risk: 'medium' }); }
             }
 
-            // Overall risk score
-            var totalIssues = invisibleFound.length + injectionFound.length + homoglyphFound.length + controlFound.length;
-            var hasCritical  = [].concat(invisibleFound, injectionFound, homoglyphFound, controlFound).some(function(i){ return i.risk === 'critical'; });
-            var hasHigh      = [].concat(invisibleFound, injectionFound, homoglyphFound, controlFound).some(function(i){ return i.risk === 'high' || i.risk === 'critical'; });
+            var allIssues = [].concat(injectionFound, invisibleFound, homoglyphFound, controlFound, normDiff);
+            var totalIssues = allIssues.length;
+            var hasCritical = allIssues.some(function(i){ return i.risk === 'critical'; });
+            var hasHigh     = allIssues.some(function(i){ return i.risk === 'high' || i.risk === 'critical'; });
 
             var verdictClass, verdictIcon, verdictTitle, verdictSub;
             if (totalIssues === 0) {
@@ -1485,8 +1590,8 @@
                 verdictSub = totalIssues + ' issue(s) found. May be benign but worth reviewing.';
             }
 
-            // Build highlighted preview
-            var previewText = text.substring(0, 500);
+            // Highlighted preview
+            var previewText = escH(text.substring(0, 500));
             INVISIBLE_CHARS.forEach(function(def) {
                 var ch = String.fromCodePoint(def.cp);
                 var re = new RegExp(ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
@@ -1503,22 +1608,24 @@
                 html += '<div class="pitest-text-preview">' + previewText + (text.length > 500 ? '\n<span style="color:var(--text-dim)">[truncated…]</span>' : '') + '</div>';
             }
 
-            html += section('red',    'fas fa-syringe',      'Injection Patterns',      injectionFound);
-            html += section('red',    'fas fa-eye-slash',    'Hidden Unicode',           invisibleFound);
-            html += section('yellow', 'fas fa-font',         'Homoglyph Lookalikes',     homoglyphFound);
-            html += section('blue',   'fas fa-terminal',     'Control Characters',       controlFound);
+            html += section('red',    'fas fa-syringe',   'Injection Patterns',    injectionFound);
+            html += section('red',    'fas fa-eye-slash', 'Hidden Unicode',         invisibleFound);
+            html += section('yellow', 'fas fa-font',      'Homoglyph Lookalikes',   homoglyphFound);
+            html += section('blue',   'fas fa-terminal',  'Control Characters',     controlFound);
+            html += section('yellow', 'fas fa-random',    'Obfuscation / Encoding', normDiff);
 
-            // Stats line
             html += '<div style="font-size:0.75rem;color:var(--text-dim);padding:0.25rem 0.25rem 0">' +
                     'Scanned ' + text.length + ' chars &middot; ' +
-                    'Injection: ' + injectionFound.length + ' &middot; ' +
+                    'Patterns: ' + injectionFound.length + ' &middot; ' +
                     'Hidden Unicode: ' + invisibleFound.length + ' &middot; ' +
                     'Homoglyphs: ' + homoglyphFound.length + ' &middot; ' +
-                    'Control: ' + controlFound.length + '</div>';
+                    'Control: ' + controlFound.length + ' &middot; ' +
+                    'Obfuscation: ' + normDiff.length + '</div>';
 
             output.innerHTML = html;
-            scanReport = { text: text, totalIssues: totalIssues, injection: injectionFound, invisible: invisibleFound, homoglyphs: homoglyphFound, control: controlFound };
+            scanReport = { text: text, totalIssues: totalIssues, injection: injectionFound, invisible: invisibleFound, homoglyphs: homoglyphFound, control: controlFound, obfuscation: normDiff };
         }
+
 
         var scanReport = null;
 
