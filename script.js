@@ -1311,10 +1311,11 @@
         var input     = document.getElementById('pitest-input');
         var output    = document.getElementById('pitest-output');
         if (!modal || !openBtn) return;
+        function resetPitest() { if (input) input.value = ''; if (output) output.innerHTML = ''; scanReport = null; }
 
         if (openBtn)  openBtn.addEventListener('click', function () { openModal(modal); });
-        if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); });
-        modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); });
+        if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); resetPitest(); });
+        modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); resetPitest(); });
 
         // ── Detection patterns ──────────────────────────────────────────────
 
