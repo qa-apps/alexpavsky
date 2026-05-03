@@ -914,7 +914,7 @@ body.light-mode .article-modal-date { color: #8a8a95; }
 
 /* ─── YouTube Video Carousel ─── */
 .yt-section {
-    overflow: hidden;
+    overflow: visible;
 }
 .yt-carousel-header {
     display: flex;
@@ -929,7 +929,7 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     border: 1px solid rgba(99,102,241,0.15);
     background: linear-gradient(145deg, rgba(99,102,241,0.04), rgba(6,182,212,0.02));
     padding: 1.25rem 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Large side arrows for YT carousel */
@@ -1017,6 +1017,7 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     overflow: hidden;
     position: relative;
     padding: 0 1.25rem;
+    border-radius: var(--radius-lg);
 }
 .yt-carousel-content {
     display: flex;
@@ -1246,6 +1247,7 @@ body.light-mode .article-modal-date { color: #8a8a95; }
 /* Feed as carousel */
 .feed-carousel-wrap {
     position: relative;
+    overflow: visible;
 }
 .feed-grid {
     display: flex;
@@ -1289,8 +1291,8 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     transform: translateY(-50%) scale(1.1);
     box-shadow: 0 6px 28px rgba(99,102,241,0.35);
 }
-.feed-carousel-btn-left { left: -24px; }
-.feed-carousel-btn-right { right: -24px; }
+.feed-carousel-btn-left { left: 8px; }
+.feed-carousel-btn-right { right: 8px; }
 @media (max-width: 900px) {
     .feed-carousel-btn-left { left: 4px; }
     .feed-carousel-btn-right { right: 4px; }
