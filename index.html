@@ -174,6 +174,8 @@
                 </div>
             </div>
             <div class="yt-carousel-frame">
+                <button class="yt-carousel-btn yt-carousel-btn-left" id="yt-btn-left" aria-label="Previous"><i class="fas fa-chevron-left"></i></button>
+                <button class="yt-carousel-btn yt-carousel-btn-right" id="yt-btn-right" aria-label="Next"><i class="fas fa-chevron-right"></i></button>
                 <div class="yt-carousel-track" id="yt-carousel-track">
                     <div class="yt-carousel-content" id="yt-carousel-content">
                 <div class="yt-card yt-card-loading">
@@ -209,11 +211,15 @@
                 <button class="filter-btn" data-filter="qa">QA & Testing</button>
                 <button class="filter-btn" data-filter="dev">Dev & Engineering</button>
             </div>
-            <div class="feed-grid" id="feed-grid">
-                <div class="feed-loading">
-                    <div class="spinner"></div>
-                    <p>Fetching latest articles...</p>
+            <div class="feed-carousel-wrap">
+                <button class="feed-carousel-btn feed-carousel-btn-left" id="feed-btn-left" aria-label="Previous"><i class="fas fa-chevron-left"></i></button>
+                <div class="feed-grid" id="feed-grid">
+                    <div class="feed-loading">
+                        <div class="spinner"></div>
+                        <p>Fetching latest articles...</p>
+                    </div>
                 </div>
+                <button class="feed-carousel-btn feed-carousel-btn-right" id="feed-btn-right" aria-label="Next"><i class="fas fa-chevron-right"></i></button>
             </div>
         </div>
     </section>

@@ -984,6 +984,52 @@
         rightBtn.addEventListener('click', function () { scrollBy(-1); });
     })();
 
+    // Big overlay arrows for YT carousel
+    (function initYtBigArrows() {
+        var track = document.getElementById('yt-carousel-content');
+        var leftBtn = document.getElementById('yt-btn-left');
+        var rightBtn = document.getElementById('yt-btn-right');
+        if (!track || !leftBtn || !rightBtn) return;
+        function scrollBy(dir) {
+            track.style.animationPlayState = 'paused';
+            var current = track.getBoundingClientRect().left;
+            var parent = track.parentElement.getBoundingClientRect().left;
+            var offset = current - parent;
+            track.style.animation = 'none';
+            track.style.transform = 'translateX(' + offset + 'px)';
+            void track.offsetWidth;
+            var jump = dir * 320;
+            var next = offset + jump;
+            var half = track.scrollWidth / 2;
+            if (Math.abs(next) > half) next = 0;
+            if (next > 0) next = 0;
+            track.style.transition = 'transform 0.4s ease';
+            track.style.transform = 'translateX(' + next + 'px)';
+            setTimeout(function () {
+                track.style.transition = '';
+                track.style.animation = '';
+                track.style.animationPlayState = '';
+                track.style.transform = '';
+            }, 3000);
+        }
+        leftBtn.addEventListener('click', function () { scrollBy(1); });
+        rightBtn.addEventListener('click', function () { scrollBy(-1); });
+    })();
+
+    // Feed carousel arrows
+    (function initFeedArrows() {
+        var grid = document.getElementById('feed-grid');
+        var leftBtn = document.getElementById('feed-btn-left');
+        var rightBtn = document.getElementById('feed-btn-right');
+        if (!grid || !leftBtn || !rightBtn) return;
+        leftBtn.addEventListener('click', function () {
+            grid.scrollBy({ left: -340, behavior: 'smooth' });
+        });
+        rightBtn.addEventListener('click', function () {
+            grid.scrollBy({ left: 340, behavior: 'smooth' });
+        });
+    })();
+
     function updateStats(articles) {
         var el = document.getElementById('stat-articles');
         if (el) {
