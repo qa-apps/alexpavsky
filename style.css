@@ -146,6 +146,13 @@ img { max-width: 100%; display: block; }
 
 .yt-section .container { max-width: 1360px; }
 
+#feed > .container,
+#explore > .container,
+#tools > .container,
+#lab > .container {
+    max-width: 1400px;
+}
+
 /* ─── Nav ─── */
 .nav {
     position: fixed;
@@ -304,10 +311,11 @@ img { max-width: 100%; display: block; }
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
-    padding: 0;
+    padding: 0 4rem 0 1.5rem;
     flex: 1;
+    gap: 2rem;
 }
 
 .hero-bg {
@@ -495,48 +503,43 @@ img { max-width: 100%; display: block; }
 .hero-visual {
     position: relative;
     z-index: 2;
-    margin-left: 3rem;
+    margin-left: 0;
     perspective: 1200px;
+    flex-shrink: 0;
 }
 
 /* ─── 3D Scene ─── */
 .hero-3d-scene {
     position: relative;
-    transform-style: preserve-3d;
 }
 
 /* ─── Terminal Card ─── */
 .terminal-card {
-    width: 420px;
-    background: rgba(17, 17, 24, 0.92);
-    border: 1px solid var(--border);
+    width: 504px;
+    background: rgb(11, 11, 20);
+    border: 1px solid rgba(99,102,241,0.2);
     border-radius: var(--radius);
     overflow: hidden;
-    backdrop-filter: blur(20px);
-    transform: rotateY(-10deg) rotateX(4deg) rotateZ(-1deg);
+    backdrop-filter: none;
+    transform: rotateY(-8deg) rotateX(3deg) rotateZ(-0.5deg);
     transform-origin: center center;
-    box-shadow:
-        0 30px 60px rgba(0,0,0,0.6),
-        -12px 24px 40px rgba(0,0,0,0.4),
-        inset 0 1px 0 rgba(255,255,255,0.06),
-        0 0 0 1px rgba(99,102,241,0.08);
+    box-shadow: 0 30px 80px rgba(0,0,0,0.65),
+        0 0 0 1px rgba(99,102,241,0.1),
+        inset 0 1px 0 rgba(255,255,255,0.06);
     transition: transform 0.5s cubic-bezier(0.23,1,0.32,1), box-shadow 0.5s ease;
 }
 
 .hero-3d-scene:hover .terminal-card {
-    transform: rotateY(-5deg) rotateX(2deg) rotateZ(-0.5deg);
-    box-shadow:
-        0 40px 80px rgba(0,0,0,0.5),
-        -8px 16px 30px rgba(0,0,0,0.3),
-        inset 0 1px 0 rgba(255,255,255,0.08),
-        0 0 0 1px rgba(99,102,241,0.15);
+    transform: rotateY(-4deg) rotateX(2deg) rotateZ(-0.25deg);
+    box-shadow: 0 40px 100px rgba(0,0,0,0.5),
+        inset 0 1px 0 rgba(255,255,255,0.08);
 }
 
 /* ─── AI Test Result Card ─── */
 .aitest-card {
     position: absolute;
-    bottom: -28px;
-    right: -44px;
+    bottom: -24px;
+    right: -20px;
     width: 210px;
     background: rgba(10, 12, 28, 0.96);
     border: 1px solid rgba(99,102,241,0.35);
@@ -669,86 +672,105 @@ img { max-width: 100%; display: block; }
     position: relative;
     z-index: 2;
     width: 100%;
-    padding: 1rem 0 1.25rem;
+    padding: 1.25rem 1.5rem 1.5rem;
     border-top: 1px solid rgba(255,255,255,0.07);
     margin-top: auto;
+    background: rgba(0,0,0,0.15);
 }
 
 .tools-strip-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
+    gap: 1.25rem;
+    max-width: 1400px;
+    margin: 0 auto;
 }
 
 .tool-strip-card {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 12px;
+    flex-direction: column;
+    gap: 0;
+    padding: 1.25rem 1.25rem 1rem;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s, box-shadow 0.2s;
     text-align: left;
     width: 100%;
     font-family: inherit;
+    position: relative;
+    overflow: hidden;
 }
 
+.tool-strip-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, var(--c, #6366f1) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    border-radius: inherit;
+}
+
+.tool-strip-card:hover::before { opacity: 0.05; }
+
 .tool-strip-card:hover {
-    background: rgba(255,255,255,0.06);
-    border-color: var(--c, rgba(255,255,255,0.15));
-    transform: translateY(-2px);
+    background: rgba(255,255,255,0.07);
+    border-color: color-mix(in srgb, var(--c, rgba(255,255,255,0.15)) 40%, transparent);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
 }
 
 .tool-strip-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--c) 15%, transparent);
-    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--c) 18%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--c);
-    font-size: 0.95rem;
+    font-size: 1.1rem;
     flex-shrink: 0;
+    margin-bottom: 0.9rem;
 }
 
 .tool-strip-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     flex: 1;
     min-width: 0;
+    margin-bottom: 1rem;
 }
 
 .tool-strip-name {
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: 0.95rem;
+    font-weight: 700;
     color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.2;
 }
 
 .tool-strip-desc {
-    font-size: 0.68rem;
+    font-size: 0.78rem;
     color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.4;
+    white-space: normal;
 }
 
 .tool-strip-arrow {
-    font-size: 1rem;
+    font-size: 0.82rem;
     font-weight: 600;
     flex-shrink: 0;
     transition: transform 0.2s;
+    letter-spacing: 0.01em;
+    margin-top: auto;
 }
 
 .tool-strip-card:hover .tool-strip-arrow {
-    transform: translateX(3px);
+    transform: translateX(4px);
 }
 
 .terminal-header {
@@ -778,10 +800,12 @@ img { max-width: 100%; display: block; }
 }
 
 .terminal-body {
-    padding: 1rem;
+    padding: 1.1rem;
     font-family: var(--mono);
     font-size: 0.8rem;
     line-height: 1.8;
+    min-height: 220px;
+    background: rgb(11, 11, 20);
 }
 
 .terminal-line { white-space: nowrap; }
@@ -1510,7 +1534,7 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     scroll-behavior: smooth;
     scrollbar-width: none;
     -ms-overflow-style: none;
-    padding: 0.25rem 60px 0.75rem;
+    padding: 0.25rem 1.75rem 0.75rem;
 }
 .feed-grid::-webkit-scrollbar { display: none; }
 

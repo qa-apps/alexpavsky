@@ -206,41 +206,39 @@
         </div><!-- /hero-inner -->
         <!-- ── Quick Tools Strip ── -->
         <div class="tools-strip">
-            <div class="container">
-                <div class="tools-strip-grid">
-                    <button class="tool-strip-card" onclick="document.getElementById('open-attackgen-btn').click()">
-                        <div class="tool-strip-icon" style="--c:#ef4444"><i class="fas fa-crosshairs"></i></div>
-                        <div class="tool-strip-info">
-                            <span class="tool-strip-name">Attack Generator</span>
-                            <span class="tool-strip-desc">Adversarial red-team prompts</span>
-                        </div>
-                        <span class="tool-strip-arrow" style="color:#ef4444">→</span>
-                    </button>
-                    <button class="tool-strip-card" onclick="document.getElementById('open-pitest-btn').click()">
-                        <div class="tool-strip-icon" style="--c:#a855f7"><i class="fas fa-shield-virus"></i></div>
-                        <div class="tool-strip-info">
-                            <span class="tool-strip-name">Prompt Injection Test</span>
-                            <span class="tool-strip-desc">Scan for hidden injections</span>
-                        </div>
-                        <span class="tool-strip-arrow" style="color:#a855f7">→</span>
-                    </button>
-                    <button class="tool-strip-card" onclick="document.getElementById('open-hallucination-btn').click()">
-                        <div class="tool-strip-icon" style="--c:#22c55e"><i class="fas fa-microscope"></i></div>
-                        <div class="tool-strip-info">
-                            <span class="tool-strip-name">RAG Tester</span>
-                            <span class="tool-strip-desc">Grounding &amp; hallucination score</span>
-                        </div>
-                        <span class="tool-strip-arrow" style="color:#22c55e">→</span>
-                    </button>
-                    <button class="tool-strip-card" onclick="document.getElementById('open-hallucination-btn').click()">
-                        <div class="tool-strip-icon" style="--c:#f59e0b"><i class="fas fa-brain"></i></div>
-                        <div class="tool-strip-info">
-                            <span class="tool-strip-name">Hallucination Tester</span>
-                            <span class="tool-strip-desc">Atomic fact verification</span>
-                        </div>
-                        <span class="tool-strip-arrow" style="color:#f59e0b">→</span>
-                    </button>
-                </div>
+            <div class="tools-strip-grid">
+                <button class="tool-strip-card" style="--c:#ef4444" onclick="document.getElementById('open-attackgen-btn').click()">
+                    <div class="tool-strip-icon"><i class="fas fa-crosshairs"></i></div>
+                    <div class="tool-strip-info">
+                        <span class="tool-strip-name">Attack Generator</span>
+                        <span class="tool-strip-desc">Generate adversarial prompts and attack scenarios.</span>
+                    </div>
+                    <span class="tool-strip-arrow" style="color:#ef4444">Generate →</span>
+                </button>
+                <button class="tool-strip-card" style="--c:#a855f7" onclick="document.getElementById('open-pitest-btn').click()">
+                    <div class="tool-strip-icon"><i class="fas fa-shield-virus"></i></div>
+                    <div class="tool-strip-info">
+                        <span class="tool-strip-name">Prompt Injection Test</span>
+                        <span class="tool-strip-desc">Detect and test prompt injection vulnerabilities.</span>
+                    </div>
+                    <span class="tool-strip-arrow" style="color:#a855f7">Test Now →</span>
+                </button>
+                <button class="tool-strip-card" style="--c:#22c55e" onclick="document.getElementById('open-hallucination-btn').click()">
+                    <div class="tool-strip-icon"><i class="fas fa-microscope"></i></div>
+                    <div class="tool-strip-info">
+                        <span class="tool-strip-name">RAG Tester</span>
+                        <span class="tool-strip-desc">Check if your AI is grounded in the provided context.</span>
+                    </div>
+                    <span class="tool-strip-arrow" style="color:#22c55e">Test RAG →</span>
+                </button>
+                <button class="tool-strip-card" style="--c:#f59e0b" onclick="document.getElementById('open-hallucination-btn').click()">
+                    <div class="tool-strip-icon"><i class="fas fa-brain"></i></div>
+                    <div class="tool-strip-info">
+                        <span class="tool-strip-name">Hallucination Tester</span>
+                        <span class="tool-strip-desc">Find hallucinations and unreliable responses.</span>
+                    </div>
+                    <span class="tool-strip-arrow" style="color:#f59e0b">Test Hallucination →</span>
+                </button>
             </div>
         </div>
     </header>
