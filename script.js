@@ -2727,6 +2727,9 @@
 
     // ─── Challenge Widget ───
     (function initChallenge() {
+        var challengeModal = document.getElementById('challenge-modal');
+        var challengeModalClose = document.getElementById('challenge-modal-close');
+        var challengeModalOverlay = document.getElementById('challenge-modal-overlay');
         var challengePlayground = document.getElementById('challenge-playground');
         var openChallengeBtn = document.getElementById('open-challenge-btn');
         var challengeInput = document.getElementById('challenge-input');
@@ -2752,7 +2755,7 @@
         var cstatBreaks = document.getElementById('cstat-breaks');
         var cstatRate = document.getElementById('cstat-rate');
 
-        if (!challengePlayground || !openChallengeBtn) return;
+        if (!challengeModal || !openChallengeBtn) return;
 
         var currentCategory = 'injection';
         var isChallenging = false;
@@ -2786,16 +2789,24 @@
             if (challengeSystemText) challengeSystemText.textContent = systemPrompts[currentCategory] || '';
         }
 
-        // Show inline playground and scroll to it
+        // Open as modal overlay
         function openChallengePlayground() {
-            challengePlayground.style.display = 'block';
+            challengeModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
             updateSystemPrompt();
             updateStatsUI();
-            challengePlayground.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-        openChallengeBtn.addEventListener('click', openChallengePlayground);
 
-        // "Break it" nav button also opens the playground
+        function closeChallengePlayground() {
+            challengeModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        openChallengeBtn.addEventListener('click', openChallengePlayground);
+        if (challengeModalClose) challengeModalClose.addEventListener('click', closeChallengePlayground);
+        if (challengeModalOverlay) challengeModalOverlay.addEventListener('click', closeChallengePlayground);
+
+        // "Break it" nav button also opens the modal
         document.querySelectorAll('.nav-link-break, .mobile-link-break').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.preventDefault();

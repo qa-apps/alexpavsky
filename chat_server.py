@@ -1628,9 +1628,18 @@ def _get_fallback_chain(current, tier):
 
 
 class Handler(SimpleHTTPRequestHandler):
+    _ALLOWED_ORIGINS = {
+        "https://alexpavsky.com",
+        "https://www.alexpavsky.com",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    }
+
     def _cors(self):
-        origin = self.headers.get("Origin", "*")
-        self.send_header("Access-Control-Allow-Origin", origin)
+        origin = self.headers.get("Origin", "")
+        allowed = origin if origin in self._ALLOWED_ORIGINS else "https://alexpavsky.com"
+        self.send_header("Access-Control-Allow-Origin", allowed)
+        self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Credentials", "true")
@@ -1943,6 +1952,48 @@ class Handler(SimpleHTTPRequestHandler):
             if not url:
                 self._json(400, {"error": "Missing url param"})
                 return
+            # SSRF/LFI defense: only allow http(s) public URLs
+            try:
+                pu = urlparse(url)
+            except Exception:
+                self._json(400, {"error": "invalid_url"})
+                return
+            if pu.scheme not in ("http", "https"):
+                self._json(400, {"error": "scheme_not_allowed"})
+                return
+            host = (pu.hostname or "").lower()
+            if not host:
+                self._json(400, {"error": "missing_host"})
+                return
+            # Block private/internal/loopback addresses
+            blocked_hosts = ("localhost", "0.0.0.0", "127.0.0.1", "::1", "169.254.169.254")
+            if host in blocked_hosts:
+                self._json(400, {"error": "host_not_allowed"})
+                return
+            if host.endswith(".local") or host.endswith(".internal") or host.endswith(".localdomain"):
+                self._json(400, {"error": "host_not_allowed"})
+                return
+            # Block private IP ranges
+            try:
+                import ipaddress as _ipaddr
+                ip = _ipaddr.ip_address(host)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                    self._json(400, {"error": "host_not_allowed"})
+                    return
+            except ValueError:
+                # Not a literal IP; resolve to ensure no DNS rebind to private space
+                try:
+                    import socket as _socket
+                    addrs = _socket.getaddrinfo(host, None)
+                    for fam, _, _, _, sa in addrs:
+                        ipstr = sa[0]
+                        ip = _ipaddr.ip_address(ipstr)
+                        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                            self._json(400, {"error": "host_not_allowed"})
+                            return
+                except Exception:
+                    self._json(400, {"error": "host_resolution_failed"})
+                    return
             try:
                 req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AlexPavskyBot/1.0)"})
                 with urlopen(req, timeout=8) as resp:
@@ -2307,6 +2358,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(502, {"error": "Newsletter signup is temporarily unavailable. Please try again."})
 
     def _handle_newsletter_run_now(self):
+        if not self._get_admin_user():
+            self._json(403, {"error": "admin_auth_required"})
+            return
         try:
             body = self._read_body()
         except Exception:
