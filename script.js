@@ -24,7 +24,10 @@
         { name: 'Two Minute Papers', channelId: 'UCbfYPyITQ-7l4upoX8nvctg' },
         { name: 'Fireship', channelId: 'UCsBjURrPoezykLs9EqgamOA' },
         { name: 'Lex Fridman', channelId: 'UCSHZKyawb77ixDdsGog4iWA' },
-        { name: 'OpenAI', channelId: 'UCXZCJLdBC09xxP5Tja2vPzw' }
+        { name: 'OpenAI', channelId: 'UCXZCJLdBC09xxP5Tja2vPzw' },
+        { name: 'MKBHD', channelId: 'UCBJycsmduvYEL83R_U4JriQ' },
+        { name: '3Blue1Brown', channelId: 'UCYO_jab_esuFRV4b17AJtAw' },
+        { name: 'Computerphile', channelId: 'UC9-y-6csu5WGm29I7JiwpnA' }
     ];
     const FEED_FALLBACK_ARTICLES = [
         {
@@ -100,6 +103,24 @@
             title: 'Lex Fridman AI conversation highlight',
             link: 'https://www.youtube.com/watch?v=7xTGNNLPyMI',
             date: '2026-03-24T12:00:00Z'
+        },
+        {
+            source: 'MKBHD',
+            title: 'MKBHD future tech and devices breakdown',
+            link: 'https://www.youtube.com/watch?v=Q9pI0v1D44A',
+            date: '2026-03-22T12:00:00Z'
+        },
+        {
+            source: '3Blue1Brown',
+            title: '3Blue1Brown intuitive math and machine learning visuals',
+            link: 'https://www.youtube.com/watch?v=aircAruvnKk',
+            date: '2026-03-20T12:00:00Z'
+        },
+        {
+            source: 'Computerphile',
+            title: 'Computerphile deep dive into practical computing concepts',
+            link: 'https://www.youtube.com/watch?v=SzJ46YA_RaA',
+            date: '2026-03-18T12:00:00Z'
         }
     ];
 
@@ -108,7 +129,14 @@
     let allArticles = [];
     let displayedCount = 0;
     const ARTICLES_PER_PAGE = 9;
+    const YT_MANUAL_SCROLL_STEP = 480;
+    const YT_MOBILE_SCROLL_STEP = 300;
+    const YT_AUTOSCROLL_PX_PER_FRAME = 0.35;
+    const YT_HOLD_SCROLL_MULTIPLIER = 3;
+    const YT_HOLD_START_DELAY_MS = 120;
+    const YT_RESUME_AFTER_INTERACTION_MS = 1800;
     let currentFilter = 'all';
+    let ytCarouselState = null;
 
     function timeoutPromise(ms) {
         return new Promise(function (_, reject) {
@@ -840,6 +868,254 @@
     })();
 
     // ─── YouTube Video Carousel ───
+    function selectYoutubeVideos(videos, limit) {
+        var seen = {};
+        var grouped = {};
+        var counts = {};
+        var result = [];
+        (videos || []).forEach(function (video) {
+            var link = (video && video.link) || '';
+            var source = ((video && video.source) || 'Featured').trim();
+            if (!link || seen[link]) return;
+            seen[link] = true;
+            if (!grouped[source]) grouped[source] = [];
+            grouped[source].push(video);
+        });
+        Object.keys(grouped).forEach(function (source) {
+            grouped[source].sort(function (a, b) {
+                return parseFeedDate(b.date) - parseFeedDate(a.date);
+            });
+        });
+        var sources = Object.keys(grouped).sort(function (a, b) {
+            return parseFeedDate(grouped[b][0].date) - parseFeedDate(grouped[a][0].date);
+        });
+        while (result.length < limit) {
+            var added = false;
+            sources.forEach(function (source) {
+                if (result.length >= limit) return;
+                if (!grouped[source] || !grouped[source].length) return;
+                if ((counts[source] || 0) >= 3) return;
+                result.push(grouped[source].shift());
+                counts[source] = (counts[source] || 0) + 1;
+                added = true;
+            });
+            if (added) continue;
+            sources.forEach(function (source) {
+                if (result.length >= limit) return;
+                if (!grouped[source] || !grouped[source].length) return;
+                result.push(grouped[source].shift());
+                added = true;
+            });
+            if (!added) break;
+        }
+        return result;
+    }
+
+    function getYoutubeScrollStep() {
+        return window.innerWidth <= 768 ? YT_MOBILE_SCROLL_STEP : YT_MANUAL_SCROLL_STEP;
+    }
+
+    function setupYoutubeCarouselMotion() {
+        var track = document.getElementById('yt-carousel-track');
+        var content = document.getElementById('yt-carousel-content');
+        if (!track || !content) return;
+        if (ytCarouselState && ytCarouselState.rafId) {
+            cancelAnimationFrame(ytCarouselState.rafId);
+        }
+        if (ytCarouselState && ytCarouselState.wrapTimer) {
+            clearTimeout(ytCarouselState.wrapTimer);
+        }
+        function getHalfWidth() {
+            return content.scrollWidth / 2;
+        }
+        function normalizeScroll() {
+            var half = getHalfWidth();
+            if (!half) return;
+            if (track.scrollLeft >= half) track.scrollLeft -= half;
+            if (track.scrollLeft < 0) track.scrollLeft += half;
+        }
+        ytCarouselState = {
+            rafId: 0,
+            wrapTimer: 0,
+            pauseUntil: 0,
+            holdDir: 0,
+            pause: function (ms) {
+                ytCarouselState.pauseUntil = Date.now() + ms;
+            },
+            manualScroll: function (dir) {
+                ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
+                normalizeScroll();
+                track.scrollBy({
+                    left: dir * getYoutubeScrollStep(),
+                    behavior: 'smooth'
+                });
+                clearTimeout(ytCarouselState.wrapTimer);
+                ytCarouselState.wrapTimer = setTimeout(function () {
+                    normalizeScroll();
+                }, 700);
+            },
+            startHold: function (dir) {
+                ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
+                ytCarouselState.holdDir = dir;
+            },
+            stopHold: function () {
+                ytCarouselState.holdDir = 0;
+                ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
+            }
+        };
+        function tick() {
+            normalizeScroll();
+            if (ytCarouselState.holdDir) {
+                track.scrollLeft += ytCarouselState.holdDir * (YT_AUTOSCROLL_PX_PER_FRAME * YT_HOLD_SCROLL_MULTIPLIER);
+            } else if (Date.now() >= ytCarouselState.pauseUntil && !track.matches(':hover')) {
+                track.scrollLeft += YT_AUTOSCROLL_PX_PER_FRAME;
+            }
+            ytCarouselState.rafId = requestAnimationFrame(tick);
+        }
+        track.scrollLeft = 0;
+        tick();
+    }
+
+    function scrollYoutubeCarousel(dir) {
+        if (!ytCarouselState) {
+            setupYoutubeCarouselMotion();
+        }
+        if (ytCarouselState) {
+            ytCarouselState.manualScroll(dir);
+        }
+    }
+
+    function startYoutubeCarouselHold(dir) {
+        if (!ytCarouselState) {
+            setupYoutubeCarouselMotion();
+        }
+        if (ytCarouselState) {
+            ytCarouselState.startHold(dir);
+        }
+    }
+
+    function stopYoutubeCarouselHold() {
+        if (ytCarouselState) {
+            ytCarouselState.stopHold();
+        }
+    }
+
+    function bindYoutubeArrowButton(button, dir) {
+        if (!button) return;
+        var holdTimer = 0;
+        var holdStarted = false;
+        var suppressClick = false;
+
+        function clearHoldTimer() {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = 0;
+            }
+        }
+
+        function beginHold(event) {
+            if (event && typeof event.button === 'number' && event.button !== 0) return;
+            clearHoldTimer();
+            holdTimer = setTimeout(function () {
+                holdStarted = true;
+                suppressClick = true;
+                startYoutubeCarouselHold(dir);
+            }, YT_HOLD_START_DELAY_MS);
+        }
+
+        function endHold() {
+            clearHoldTimer();
+            if (holdStarted) {
+                stopYoutubeCarouselHold();
+                holdStarted = false;
+            }
+        }
+
+        button.addEventListener('pointerdown', beginHold);
+        button.addEventListener('pointerup', endHold);
+        button.addEventListener('pointercancel', endHold);
+        button.addEventListener('lostpointercapture', endHold);
+        button.addEventListener('pointerleave', function (event) {
+            if (holdStarted && !(event.buttons & 1)) {
+                endHold();
+            }
+        });
+        button.addEventListener('click', function (event) {
+            if (suppressClick) {
+                event.preventDefault();
+                suppressClick = false;
+                return;
+            }
+            scrollYoutubeCarousel(dir);
+        });
+    }
+
+    function getYoutubeVideoId(url) {
+        var match = (url || '').match(/[?&]v=([A-Za-z0-9_\-]+)/);
+        return match ? match[1] : '';
+    }
+
+    function getYoutubeThumbCandidates(videoId) {
+        if (!videoId) return [];
+        return [
+            'https://i.ytimg.com/vi_webp/' + videoId + '/maxresdefault.webp',
+            'https://i.ytimg.com/vi_webp/' + videoId + '/hqdefault.webp',
+            'https://i.ytimg.com/vi/' + videoId + '/maxresdefault.jpg',
+            'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg',
+            'https://i.ytimg.com/vi/' + videoId + '/mqdefault.jpg'
+        ];
+    }
+
+    function isYoutubeVideoRenderable(video) {
+        var title = ((video && video.title) || '').trim();
+        var link = ((video && video.link) || '').trim();
+        var videoId = getYoutubeVideoId(link);
+        if (!title || !link || !videoId) return false;
+        if (/^(private|deleted)\s+video$/i.test(title)) return false;
+        return true;
+    }
+
+    function attachYoutubeThumbFallback(img) {
+        if (!img) return;
+        var candidates = (img.getAttribute('data-thumb-candidates') || '').split('|').filter(Boolean);
+        if (!candidates.length) {
+            var emptyCard = img.closest('.yt-card');
+            if (emptyCard) emptyCard.remove();
+            return;
+        }
+        function removeCard() {
+            var card = img.closest('.yt-card');
+            if (card) card.remove();
+        }
+        function tryIndex(index) {
+            if (index >= candidates.length) {
+                removeCard();
+                return;
+            }
+            img.setAttribute('data-thumb-index', String(index));
+            img.src = candidates[index];
+        }
+        function handleLoadedThumb() {
+            var index = Number(img.getAttribute('data-thumb-index') || '0');
+            if (!img.naturalWidth || !img.naturalHeight || (img.naturalWidth <= 160 && img.naturalHeight <= 120)) {
+                tryIndex(index + 1);
+            }
+        }
+        function handleThumbError() {
+            var index = Number(img.getAttribute('data-thumb-index') || '0');
+            tryIndex(index + 1);
+        }
+        img.addEventListener('load', handleLoadedThumb);
+        img.addEventListener('error', handleThumbError);
+        if (img.complete) {
+            if (img.naturalWidth || img.naturalHeight) {
+                handleLoadedThumb();
+            } else {
+                handleThumbError();
+            }
+        }
+    }
+
     function renderYoutubeCarousel(videos) {
         var container = document.getElementById('yt-carousel-content');
         if (!container) { console.warn('[YT Carousel] Container not found'); return; }
@@ -847,15 +1123,15 @@
             container.innerHTML = '<div style="padding:2rem;color:var(--text-dim)">No recent videos found</div>';
             return;
         }
-        var cards = videos.slice(0, 20);
+        var cards = selectYoutubeVideos((videos || []).filter(isYoutubeVideoRenderable), 24);
         var html = '';
         function makeCard(v) {
-            var vid = (v.link || '').match(/[?&]v=([A-Za-z0-9_\-]+)/);
-            var videoId = vid ? vid[1] : '';
-            var thumb = v.thumb || (videoId ? 'https://i.ytimg.com/vi/' + videoId + '/mqdefault.jpg' : '');
+            var videoId = getYoutubeVideoId(v.link || '');
+            var thumbCandidates = getYoutubeThumbCandidates(videoId);
+            var thumb = thumbCandidates[0] || v.thumb || '';
             return '<a class="yt-card" href="' + escapeHtml(v.link) + '" target="_blank" rel="noopener" data-video-id="' + escapeHtml(videoId) + '">' +
                 '<div class="yt-card-thumb">' +
-                    '<img src="' + escapeHtml(thumb) + '" alt="" loading="lazy">' +
+                    '<img src="' + escapeHtml(thumb) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-thumb-index="0" data-thumb-candidates="' + escapeHtml(thumbCandidates.join('|')) + '">' +
                     '<div class="yt-card-play"><i class="fas fa-play"></i></div>' +
                 '</div>' +
                 '<div class="yt-card-info">' +
@@ -866,6 +1142,8 @@
         }
         cards.forEach(function (v) { html += makeCard(v); });
         container.innerHTML = html + html;
+        setupYoutubeCarouselMotion();
+        container.querySelectorAll('.yt-card-thumb img').forEach(attachYoutubeThumbFallback);
 
         container.querySelectorAll('.yt-card').forEach(function (card) {
             var videoId = card.getAttribute('data-video-id');
@@ -914,9 +1192,10 @@
             if (videos.length === 0) {
                 videos = YOUTUBE_FALLBACK_VIDEOS.slice();
             }
+            videos = videos.concat(YOUTUBE_FALLBACK_VIDEOS);
             console.log('[YT Carousel] Got', videos.length, 'videos');
             renderYoutubeCarousel(videos);
-            console.log('[YT Carousel] Rendered', videos.slice(0, 20).length, 'cards');
+            console.log('[YT Carousel] Rendered carousel');
         } catch (e) {
             console.error('[YT Carousel] Error:', e);
         }
@@ -954,66 +1233,20 @@
 
     // YouTube carousel arrow navigation
     (function initYtArrows() {
-        var track = document.getElementById('yt-carousel-content');
         var leftBtn = document.getElementById('yt-arrow-left');
         var rightBtn = document.getElementById('yt-arrow-right');
-        if (!track || !leftBtn || !rightBtn) return;
-        function scrollBy(dir) {
-            track.style.animationPlayState = 'paused';
-            var current = track.getBoundingClientRect().left;
-            var parent = track.parentElement.getBoundingClientRect().left;
-            var offset = current - parent;
-            track.style.animation = 'none';
-            track.style.transform = 'translateX(' + offset + 'px)';
-            void track.offsetWidth;
-            var jump = dir * 300;
-            var next = offset + jump;
-            var half = track.scrollWidth / 2;
-            if (Math.abs(next) > half) next = 0;
-            if (next > 0) next = 0;
-            track.style.transition = 'transform 0.4s ease';
-            track.style.transform = 'translateX(' + next + 'px)';
-            setTimeout(function () {
-                track.style.transition = '';
-                track.style.animation = '';
-                track.style.animationPlayState = '';
-                track.style.transform = '';
-            }, 3000); // resume auto-scroll after 3s
-        }
-        leftBtn.addEventListener('click', function () { scrollBy(1); });
-        rightBtn.addEventListener('click', function () { scrollBy(-1); });
+        if (!leftBtn || !rightBtn) return;
+        bindYoutubeArrowButton(leftBtn, -1);
+        bindYoutubeArrowButton(rightBtn, 1);
     })();
 
     // Big overlay arrows for YT carousel
     (function initYtBigArrows() {
-        var track = document.getElementById('yt-carousel-content');
         var leftBtn = document.getElementById('yt-btn-left');
         var rightBtn = document.getElementById('yt-btn-right');
-        if (!track || !leftBtn || !rightBtn) return;
-        function scrollBy(dir) {
-            track.style.animationPlayState = 'paused';
-            var current = track.getBoundingClientRect().left;
-            var parent = track.parentElement.getBoundingClientRect().left;
-            var offset = current - parent;
-            track.style.animation = 'none';
-            track.style.transform = 'translateX(' + offset + 'px)';
-            void track.offsetWidth;
-            var jump = dir * 320;
-            var next = offset + jump;
-            var half = track.scrollWidth / 2;
-            if (Math.abs(next) > half) next = 0;
-            if (next > 0) next = 0;
-            track.style.transition = 'transform 0.4s ease';
-            track.style.transform = 'translateX(' + next + 'px)';
-            setTimeout(function () {
-                track.style.transition = '';
-                track.style.animation = '';
-                track.style.animationPlayState = '';
-                track.style.transform = '';
-            }, 3000);
-        }
-        leftBtn.addEventListener('click', function () { scrollBy(1); });
-        rightBtn.addEventListener('click', function () { scrollBy(-1); });
+        if (!leftBtn || !rightBtn) return;
+        bindYoutubeArrowButton(leftBtn, -1);
+        bindYoutubeArrowButton(rightBtn, 1);
     })();
 
     // Feed carousel arrows
@@ -1665,6 +1898,7 @@
         var fileInput = document.getElementById('chat-file-input');
         var attachmentsContainer = document.getElementById('chat-attachments');
         var chatInputContainer = chatWindow ? chatWindow.querySelector('.chat-input-container') : null;
+        var chatInputWrap = chatWindow ? chatWindow.querySelector('.chat-input-wrap') : null;
         var resizeTopHandle = document.getElementById('chat-resize-top');
         var resizeLeftHandle = document.getElementById('chat-resize-left');
         var openChatBtn = document.getElementById('open-chat-btn');
@@ -1731,12 +1965,114 @@
         var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         var recognition = null;
         var isListening = false;
+        var voiceMeterContext = null;
+        var voiceMeterAnalyser = null;
+        var voiceMeterSource = null;
+        var voiceMeterStream = null;
+        var voiceMeterData = null;
+        var voiceMeterFrame = null;
+        var voiceMeterLevel = 0.14;
         var voiceLangs = [
             {code: '', label: 'Auto'}, {code: 'en-US', label: 'EN'}, {code: 'ru-RU', label: 'RU'},
             {code: 'es-ES', label: 'ES'}, {code: 'de-DE', label: 'DE'}, {code: 'fr-FR', label: 'FR'},
             {code: 'zh-CN', label: '中文'}, {code: 'pt-BR', label: 'PT'}, {code: 'ar-SA', label: 'AR'},
         ];
         var voiceLangIndex = 0;
+
+        function resolveSpeechLang(code) {
+            if (code) return code;
+            var docLang = document.documentElement && typeof document.documentElement.lang === 'string'
+                ? document.documentElement.lang.trim()
+                : '';
+            if (docLang) return docLang;
+            var navLang = typeof navigator.language === 'string' ? navigator.language.trim() : '';
+            if (navLang) return navLang;
+            if (navigator.languages && navigator.languages.length) {
+                var firstLang = typeof navigator.languages[0] === 'string' ? navigator.languages[0].trim() : '';
+                if (firstLang) return firstLang;
+            }
+            return 'en-US';
+        }
+
+        function setVoiceMeterLevel(level) {
+            voiceMeterLevel = Math.max(0.14, Math.min(1, level || 0));
+            if (chatInputWrap) chatInputWrap.style.setProperty('--voice-level', String(voiceMeterLevel));
+        }
+
+        function renderVoiceMeter() {
+            if (!voiceMeterAnalyser || !voiceMeterData) return;
+            voiceMeterAnalyser.getByteTimeDomainData(voiceMeterData);
+            var total = 0;
+            for (var i = 0; i < voiceMeterData.length; i++) {
+                var centered = (voiceMeterData[i] - 128) / 128;
+                total += centered * centered;
+            }
+            var rms = Math.sqrt(total / voiceMeterData.length);
+            var nextLevel = Math.min(1, 0.14 + rms * 4.8);
+            setVoiceMeterLevel(voiceMeterLevel * 0.6 + nextLevel * 0.4);
+            voiceMeterFrame = window.requestAnimationFrame(renderVoiceMeter);
+        }
+
+        function stopVoiceMetering() {
+            if (voiceMeterFrame) {
+                window.cancelAnimationFrame(voiceMeterFrame);
+                voiceMeterFrame = null;
+            }
+            if (voiceMeterSource) {
+                try { voiceMeterSource.disconnect(); } catch (e) {}
+                voiceMeterSource = null;
+            }
+            if (voiceMeterAnalyser) {
+                try { voiceMeterAnalyser.disconnect(); } catch (e) {}
+                voiceMeterAnalyser = null;
+            }
+            if (voiceMeterStream) {
+                voiceMeterStream.getTracks().forEach(function (track) { track.stop(); });
+                voiceMeterStream = null;
+            }
+            if (voiceMeterContext) {
+                try { voiceMeterContext.close(); } catch (e) {}
+                voiceMeterContext = null;
+            }
+            voiceMeterData = null;
+            setVoiceMeterLevel(0.14);
+            if (chatInputWrap) chatInputWrap.classList.remove('listening');
+        }
+
+        function startVoiceMetering() {
+            if (chatInputWrap) chatInputWrap.classList.add('listening');
+            if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+                setVoiceMeterLevel(0.22);
+                return Promise.resolve();
+            }
+            if (voiceMeterStream || voiceMeterFrame) return Promise.resolve();
+            return navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            }).then(function (stream) {
+                var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextCtor) {
+                    voiceMeterStream = stream;
+                    setVoiceMeterLevel(0.22);
+                    return;
+                }
+                voiceMeterStream = stream;
+                voiceMeterContext = new AudioContextCtor();
+                voiceMeterSource = voiceMeterContext.createMediaStreamSource(stream);
+                voiceMeterAnalyser = voiceMeterContext.createAnalyser();
+                voiceMeterAnalyser.fftSize = 128;
+                voiceMeterAnalyser.smoothingTimeConstant = 0.82;
+                voiceMeterData = new Uint8Array(voiceMeterAnalyser.frequencyBinCount);
+                voiceMeterSource.connect(voiceMeterAnalyser);
+                setVoiceMeterLevel(0.18);
+                renderVoiceMeter();
+            }).catch(function () {
+                setVoiceMeterLevel(0.22);
+            });
+        }
 
         // Chat teaser + notification dot
         var chatTeaser = document.getElementById('chat-teaser');
@@ -1768,6 +2104,8 @@
         function closeChat() {
             if (!isOpen) return;
             isOpen = false;
+            if (isListening && recognition) recognition.stop();
+            stopVoiceMetering();
             chatWindow.classList.remove('active');
             chatToggle.classList.remove('active');
         }
@@ -1811,6 +2149,8 @@
             chatReset.addEventListener('click', function () {
                 if (currentAbort) { currentAbort.abort(); currentAbort = null; }
                 isSending = false;
+                if (isListening && recognition) recognition.stop();
+                stopVoiceMetering();
                 if (chatStop) chatStop.classList.remove('visible');
                 chatMessages.innerHTML = '<div class="chat-message bot-message"><div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content"><p>' + WELCOME_MSG + '</p></div></div>';
                 chatInput.value = '';
@@ -1874,7 +2214,7 @@
         // ── Voice input ──
         if (micBtn && SpeechRecognition) {
             recognition = new SpeechRecognition();
-            recognition.lang = voiceLangs[0].code;
+            recognition.lang = resolveSpeechLang(voiceLangs[0].code);
             recognition.interimResults = false;
             recognition.maxAlternatives = 1;
             recognition.continuous = false;
@@ -1884,9 +2224,21 @@
             langBadge.textContent = voiceLangs[0].label;
             micBtn.appendChild(langBadge);
 
-            recognition.onstart = function () { isListening = true; micBtn.classList.add('active'); };
-            recognition.onend = function () { isListening = false; micBtn.classList.remove('active'); };
-            recognition.onerror = function () { isListening = false; micBtn.classList.remove('active'); };
+            recognition.onstart = function () {
+                isListening = true;
+                micBtn.classList.add('active');
+                startVoiceMetering();
+            };
+            recognition.onend = function () {
+                isListening = false;
+                micBtn.classList.remove('active');
+                stopVoiceMetering();
+            };
+            recognition.onerror = function () {
+                isListening = false;
+                micBtn.classList.remove('active');
+                stopVoiceMetering();
+            };
 
             recognition.onresult = function (event) {
                 var spoken = event && event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
@@ -1899,14 +2251,22 @@
 
             micBtn.addEventListener('click', function () {
                 if (isListening) recognition.stop();
-                else { recognition.lang = voiceLangs[voiceLangIndex].code; recognition.start(); }
+                else {
+                    startVoiceMetering();
+                    recognition.lang = resolveSpeechLang(voiceLangs[voiceLangIndex].code);
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        stopVoiceMetering();
+                    }
+                }
             });
 
             micBtn.addEventListener('contextmenu', function (e) {
                 e.preventDefault();
                 if (isListening) recognition.stop();
                 voiceLangIndex = (voiceLangIndex + 1) % voiceLangs.length;
-                recognition.lang = voiceLangs[voiceLangIndex].code;
+                recognition.lang = resolveSpeechLang(voiceLangs[voiceLangIndex].code);
                 langBadge.textContent = voiceLangs[voiceLangIndex].label;
             });
         } else if (micBtn) {
@@ -2361,204 +2721,133 @@
         animObserver.observe(el);
     });
 
-    // ─── AI vs Human Game ───
-    var aivshuSnippets = [
-        {
-            code: "function debounce(fn, ms) {\n  let t;\n  return function(...args) {\n    clearTimeout(t);\n    t = setTimeout(() => fn.apply(this, args), ms);\n  };\n  // TODO: add cancel method later\n}",
-            answer: "human",
-            hint: "The TODO comment and informal style are typical of human code."
-        },
-        {
-            code: "/**\n * Calculates the factorial of a non-negative integer.\n * @param {number} n - The input number.\n * @returns {number} The factorial of n.\n * @throws {RangeError} If n is negative.\n */\nfunction factorial(n) {\n  if (n < 0) throw new RangeError('Input must be non-negative');\n  if (n <= 1) return 1;\n  return n * factorial(n - 1);\n}",
-            answer: "ai",
-            hint: "Perfect JSDoc, thorough error handling, and textbook recursion are AI hallmarks."
-        },
-        {
-            code: "// quick fix for prod - mike said this works\nconst retry = (fn, n) => fn().catch(e =>\n  n > 0 ? retry(fn, n - 1) : Promise.reject(e)\n);\n// TODO: add backoff",
-            answer: "human",
-            hint: "Comments referencing a teammate and a TODO note scream human authorship."
-        },
-        {
-            code: "interface ValidationResult<T> {\n  success: boolean;\n  data?: T;\n  errors: ReadonlyArray<{\n    field: string;\n    message: string;\n    code: string;\n  }>;\n}\n\nfunction validate<T>(schema: Schema<T>, input: unknown): ValidationResult<T> {\n  const errors: ValidationResult<T>['errors'] = [];\n  // ... validation logic\n  return { success: errors.length === 0, data: input as T, errors };\n}",
-            answer: "ai",
-            hint: "Generics, ReadonlyArray, and clean TypeScript patterns - AI loves type safety."
-        },
-        {
-            code: "// HACK: Safari doesn't fire resize on orientation change\nlet lastW = window.innerWidth;\nsetInterval(() => {\n  if (window.innerWidth !== lastW) {\n    lastW = window.innerWidth;\n    handleResize(); // defined somewhere above lol\n  }\n}, 200);",
-            answer: "human",
-            hint: "Browser hacks, 'lol' comment, and setInterval polling = classic human workaround."
-        },
-        {
-            code: "async function fetchWithRetry(\n  url: string,\n  options: RequestInit = {},\n  maxRetries: number = 3,\n  baseDelay: number = 1000\n): Promise<Response> {\n  for (let attempt = 0; attempt <= maxRetries; attempt++) {\n    try {\n      const response = await fetch(url, options);\n      if (response.ok) return response;\n      if (response.status < 500) throw new Error(`Client error: ${response.status}`);\n    } catch (error) {\n      if (attempt === maxRetries) throw error;\n    }\n    await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt)));\n  }\n  throw new Error('Max retries exceeded');\n}",
-            answer: "ai",
-            hint: "Exponential backoff, typed params, exhaustive error handling - textbook AI pattern."
-        },
-        {
-            code: "const el = document.getElementById('app');\nel.innerHTML = data.map(x =>\n  `<div class=\"item ${x.active ? 'on' : ''}\">\n    <b>${x.name}</b> - $${x.price.toFixed(2)}\n  </div>`\n).join('');\n// ugh template literals are ugly for this",
-            answer: "human",
-            hint: "Opinionated comment and raw DOM manipulation are human coding habits."
-        },
-        {
-            code: "class EventEmitter {\n  private listeners: Map<string, Set<Function>> = new Map();\n\n  on(event: string, callback: Function): void {\n    if (!this.listeners.has(event)) {\n      this.listeners.set(event, new Set());\n    }\n    this.listeners.get(event)!.add(callback);\n  }\n\n  emit(event: string, ...args: unknown[]): void {\n    this.listeners.get(event)?.forEach(cb => cb(...args));\n  }\n\n  off(event: string, callback: Function): void {\n    this.listeners.get(event)?.delete(callback);\n  }\n}",
-            answer: "ai",
-            hint: "Clean class structure with Map/Set, proper TypeScript, and no shortcuts - AI generated."
-        },
-        {
-            code: "# dont ask why this works\ndef fix_encoding(s):\n    try:\n        return s.encode('latin-1').decode('utf-8')\n    except:\n        return s  # ¯\\_(ツ)_/¯",
-            answer: "human",
-            hint: "Shrug emoji, bare except, and 'dont ask why' - only a human writes this."
-        },
-        {
-            code: "def merge_sort(arr: list[int]) -> list[int]:\n    \"\"\"Sort a list of integers using the merge sort algorithm.\n    \n    Args:\n        arr: The list of integers to sort.\n    \n    Returns:\n        A new sorted list.\n    \n    Time complexity: O(n log n)\n    Space complexity: O(n)\n    \"\"\"\n    if len(arr) <= 1:\n        return arr\n    mid = len(arr) // 2\n    left = merge_sort(arr[:mid])\n    right = merge_sort(arr[mid:])\n    return _merge(left, right)",
-            answer: "ai",
-            hint: "Detailed docstring with complexity analysis and type hints - classic AI output."
-        },
-        {
-            code: "/* why is css like this */\n.nav-thing {\n  display: flex;\n  gap: 8px; /* finally gap works in safari */\n}\n.nav-thing > a {\n  color: inherit;\n  text-decoration: none; /* i always forget this */\n}",
-            answer: "human",
-            hint: "Frustrated CSS comments and browser complaints are a human developer mood."
-        },
-        {
-            code: "/**\n * Deeply clones an object, handling circular references,\n * Date objects, RegExp, Maps, and Sets.\n * @template T\n * @param {T} obj - The object to clone.\n * @param {WeakMap} [seen] - Internal tracking for circular refs.\n * @returns {T} A deep clone of the input.\n */\nfunction deepClone(obj, seen = new WeakMap()) {\n  if (obj === null || typeof obj !== 'object') return obj;\n  if (seen.has(obj)) return seen.get(obj);\n  if (obj instanceof Date) return new Date(obj);\n  if (obj instanceof RegExp) return new RegExp(obj);\n  const clone = Array.isArray(obj) ? [] : {};\n  seen.set(obj, clone);\n  for (const key of Object.keys(obj)) {\n    clone[key] = deepClone(obj[key], seen);\n  }\n  return clone;\n}",
-            answer: "ai",
-            hint: "Handles every edge case, uses WeakMap for circular refs, perfect JSDoc - AI thoroughness."
-        },
-        {
-            code: "SELECT u.name, COUNT(o.id) as order_count,\n       SUM(o.total) as lifetime_value\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nWHERE u.created_at > '2024-01-01'\n  -- AND u.is_test = false  (uncomment for prod)\nGROUP BY u.id\nHAVING COUNT(o.id) > 0\nORDER BY lifetime_value DESC\nLIMIT 50;  -- bump this up later",
-            answer: "human",
-            hint: "Commented-out clause, 'uncomment for prod', and 'bump this up later' = human SQL."
-        },
-        {
-            code: "from dataclasses import dataclass, field\nfrom typing import Optional\nfrom datetime import datetime\n\n@dataclass\nclass User:\n    \"\"\"Represents a user entity in the system.\"\"\"\n    id: int\n    username: str\n    email: str\n    created_at: datetime = field(default_factory=datetime.now)\n    is_active: bool = True\n    role: str = \"user\"\n    last_login: Optional[datetime] = None\n\n    def __post_init__(self) -> None:\n        if not self.email or \"@\" not in self.email:\n            raise ValueError(f\"Invalid email: {self.email}\")",
-            answer: "ai",
-            hint: "Perfect dataclass with type hints, validation, and docstring - AI textbook pattern."
-        },
-        {
-            code: "// copied from stackoverflow, modified a bit\nfunction formatBytes(bytes) {\n  if (bytes === 0) return '0 B';\n  const k = 1024;\n  const sizes = ['B', 'KB', 'MB', 'GB'];\n  const i = Math.floor(Math.log(bytes) / Math.log(k));\n  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];\n  // close enough\n}",
-            answer: "human",
-            hint: "'Copied from stackoverflow' and 'close enough' are quintessential human markers."
-        },
-        {
-            code: "const useLocalStorage = <T>(key: string, initialValue: T) => {\n  const [storedValue, setStoredValue] = useState<T>(() => {\n    try {\n      const item = window.localStorage.getItem(key);\n      return item ? JSON.parse(item) : initialValue;\n    } catch (error) {\n      console.error(`Error reading localStorage key \"${key}\":`, error);\n      return initialValue;\n    }\n  });\n\n  const setValue = (value: T | ((val: T) => T)) => {\n    try {\n      const valueToStore = value instanceof Function ? value(storedValue) : value;\n      setStoredValue(valueToStore);\n      window.localStorage.setItem(key, JSON.stringify(valueToStore));\n    } catch (error) {\n      console.error(`Error setting localStorage key \"${key}\":`, error);\n    }\n  };\n\n  return [storedValue, setValue] as const;\n};",
-            answer: "ai",
-            hint: "Generic React hook with full error handling and proper TypeScript - AI-generated pattern."
-        },
-        {
-            code: "# FIXME: this breaks if user has no avatar\n# see ticket JIRA-4521\ndef get_profile_pic(user):\n    url = user.get('avatar', '')\n    if not url:\n        url = '/static/default.png'  # john's cat pic lol\n    return url",
-            answer: "human",
-            hint: "JIRA ticket reference, FIXME, and inside joke about a colleague's cat - human code."
-        },
-        {
-            code: "async function processQueue<T>(\n  items: T[],\n  handler: (item: T) => Promise<void>,\n  concurrency: number = 5\n): Promise<void> {\n  const queue = [...items];\n  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {\n    while (queue.length > 0) {\n      const item = queue.shift()!;\n      await handler(item);\n    }\n  });\n  await Promise.all(workers);\n}",
-            answer: "ai",
-            hint: "Generic concurrent queue with configurable workers and clean TypeScript - AI pattern."
-        },
-        {
-            code: "// idk why but removing this breaks everything\nwindow.addEventListener('load', () => {\n  setTimeout(() => {\n    document.body.classList.add('ready');\n  }, 0); // yes, 0ms timeout is intentional\n});",
-            answer: "human",
-            hint: "'Idk why but removing this breaks everything' is peak human debugging legacy."
-        }
-    ];
+    // ─── Attack Generator ───
+    var attackgenModal = document.getElementById('attackgen-modal');
+    var attackgenOutput = document.getElementById('attackgen-output');
+    var attackgenRunBtn = document.getElementById('attackgen-run-btn');
+    var attackgenClearBtn = document.getElementById('attackgen-clear-btn');
 
-    var aivshuState = { round: 0, score: 0, order: [] };
-
-    function shuffleArray(arr) {
-        var a = arr.slice();
-        for (var i = a.length - 1; i > 0; i--) {
-            var j = Math.floor(Math.random() * (i + 1));
-            var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
-        }
-        return a;
-    }
-
-    var AIVSHU_ROUNDS = 10;
-
-    function aivshuStart() {
-        aivshuState.round = 0;
-        aivshuState.score = 0;
-        var all = shuffleArray(aivshuSnippets.map(function (_, i) { return i; }));
-        aivshuState.order = all.slice(0, AIVSHU_ROUNDS);
-        document.getElementById('aivshu-final').style.display = 'none';
-        aivshuShowRound();
-    }
-
-    function aivshuShowRound() {
-        var idx = aivshuState.order[aivshuState.round];
-        var snippet = aivshuSnippets[idx];
-        document.getElementById('aivshu-round').textContent = aivshuState.round + 1;
-        document.getElementById('aivshu-score').textContent = aivshuState.score;
-        document.getElementById('aivshu-code').textContent = snippet.code;
-        document.getElementById('aivshu-feedback').style.display = 'none';
-        var btns = document.getElementById('aivshu-buttons');
-        btns.style.display = 'flex';
-        btns.querySelectorAll('.aivshu-btn').forEach(function (b) {
-            b.classList.remove('correct', 'wrong');
-            b.disabled = false;
+    function escapeAttackHtml(str) {
+        return String(str).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
         });
     }
 
-    function aivshuAnswer(choice) {
-        var idx = aivshuState.order[aivshuState.round];
-        var snippet = aivshuSnippets[idx];
-        var correct = choice === snippet.answer;
-        if (correct) aivshuState.score++;
-        document.getElementById('aivshu-score').textContent = aivshuState.score;
+    function attackgenSeverityClass(sev) {
+        var s = String(sev || '').toLowerCase();
+        if (s === 'critical') return 'sev-critical';
+        if (s === 'high') return 'sev-high';
+        if (s === 'medium') return 'sev-medium';
+        return 'sev-low';
+    }
 
-        var btns = document.querySelectorAll('.aivshu-btn');
-        btns.forEach(function (b) {
-            b.disabled = true;
-            if (b.dataset.answer === snippet.answer) b.classList.add('correct');
-            if (b.dataset.answer === choice && !correct) b.classList.add('wrong');
-        });
+    function renderAttackResult(data) {
+        if (data.parse_error) {
+            attackgenOutput.innerHTML =
+                '<div class="attackgen-card attackgen-error">' +
+                '<div class="attackgen-card-header"><i class="fas fa-exclamation-triangle"></i> Parser fallback — raw output</div>' +
+                '<pre class="attackgen-prompt-block">' + escapeAttackHtml(data.raw || '') + '</pre>' +
+                '<div class="attackgen-meta">Model: ' + escapeAttackHtml(data.model || '') + '</div>' +
+                '</div>';
+            return;
+        }
+        var sevClass = attackgenSeverityClass(data.severity);
+        var multiTurnHtml = '';
+        if (Array.isArray(data.multi_turn) && data.multi_turn.length > 0) {
+            multiTurnHtml = '<div class="attackgen-section"><div class="attackgen-section-title"><i class="fas fa-list-ol"></i> Multi-turn Sequence</div>';
+            data.multi_turn.forEach(function (turn, i) {
+                multiTurnHtml += '<div class="attackgen-turn"><span class="attackgen-turn-num">Turn ' + (i + 1) + '</span><div class="attackgen-turn-text">' + escapeAttackHtml(turn) + '</div></div>';
+            });
+            multiTurnHtml += '</div>';
+        }
+        var owaspBadge = data.owasp_category ? '<span class="attackgen-badge attackgen-owasp">' + escapeAttackHtml(data.owasp_category) + '</span>' : '';
+        attackgenOutput.innerHTML =
+            '<div class="attackgen-card">' +
+                '<div class="attackgen-card-header">' +
+                    '<div class="attackgen-title-row">' +
+                        '<h4>' + escapeAttackHtml(data.attack_name || 'Attack') + '</h4>' +
+                        '<div class="attackgen-badges">' +
+                            '<span class="attackgen-badge attackgen-sev ' + sevClass + '">' + escapeAttackHtml(data.severity || 'Medium') + '</span>' +
+                            owaspBadge +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="attackgen-technique">' + escapeAttackHtml(data.technique_used || '') + '</div>' +
+                '</div>' +
+                '<div class="attackgen-section">' +
+                    '<div class="attackgen-section-title"><i class="fas fa-bolt"></i> Adversarial Prompt <button class="attackgen-copy-btn" data-copy="prompt"><i class="fas fa-copy"></i> Copy</button></div>' +
+                    '<pre class="attackgen-prompt-block" id="attackgen-prompt-text">' + escapeAttackHtml(data.attack_prompt || '') + '</pre>' +
+                '</div>' +
+                multiTurnHtml +
+                (data.why_it_works ? '<div class="attackgen-section"><div class="attackgen-section-title"><i class="fas fa-brain"></i> Why It Works</div><p>' + escapeAttackHtml(data.why_it_works) + '</p></div>' : '') +
+                (data.what_to_look_for ? '<div class="attackgen-section"><div class="attackgen-section-title"><i class="fas fa-search"></i> What to Look For</div><p>' + escapeAttackHtml(data.what_to_look_for) + '</p></div>' : '') +
+                (data.mitigation ? '<div class="attackgen-section attackgen-mitigation"><div class="attackgen-section-title"><i class="fas fa-shield-alt"></i> Mitigation</div><p>' + escapeAttackHtml(data.mitigation) + '</p></div>' : '') +
+                '<div class="attackgen-meta">Generated by ' + escapeAttackHtml(data.model || '') + '</div>' +
+            '</div>';
 
-        var fb = document.getElementById('aivshu-feedback');
-        fb.style.display = 'block';
-        document.getElementById('aivshu-feedback-icon').textContent = correct ? '✅' : '❌';
-        document.getElementById('aivshu-feedback-text').textContent = correct ? 'Correct!' : 'Wrong!';
-        document.getElementById('aivshu-explanation').textContent = snippet.hint;
-
-        if (aivshuState.round >= aivshuState.order.length - 1) {
-            document.getElementById('aivshu-next-btn').style.display = 'none';
-            setTimeout(aivshuShowFinal, 1500);
-        } else {
-            document.getElementById('aivshu-next-btn').style.display = '';
+        var copyBtn = attackgenOutput.querySelector('.attackgen-copy-btn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', function () {
+                var text = data.attack_prompt || '';
+                if (Array.isArray(data.multi_turn) && data.multi_turn.length > 0) {
+                    text = data.multi_turn.map(function (t, i) { return '[Turn ' + (i + 1) + ']\n' + t; }).join('\n\n');
+                }
+                navigator.clipboard.writeText(text).then(function () {
+                    copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied';
+                    setTimeout(function () { copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy'; }, 1500);
+                });
+            });
         }
     }
 
-    function aivshuShowFinal() {
-        document.getElementById('aivshu-feedback').style.display = 'none';
-        document.getElementById('aivshu-buttons').style.display = 'none';
-        var finalDiv = document.getElementById('aivshu-final');
-        finalDiv.style.display = 'block';
-        var pct = Math.round((aivshuState.score / aivshuState.order.length) * 100);
-        var icon, title;
-        if (pct >= 88) { icon = '🏆'; title = 'AI Code Detective!'; }
-        else if (pct >= 63) { icon = '🔍'; title = 'Sharp Eye!'; }
-        else { icon = '🤔'; title = 'Keep Practicing!'; }
-        document.getElementById('aivshu-final-icon').textContent = icon;
-        document.getElementById('aivshu-final-title').textContent = title;
-        document.getElementById('aivshu-final-score').textContent = aivshuState.score + ' / ' + aivshuState.order.length + ' correct (' + pct + '%)';
+    function runAttackGenerator() {
+        var payload = {
+            industry: document.getElementById('attackgen-industry').value,
+            targetType: document.getElementById('attackgen-target').value,
+            attackType: document.getElementById('attackgen-attacktype').value,
+            severity: document.getElementById('attackgen-severity').value,
+            language: document.getElementById('attackgen-language').value,
+            systemDescription: document.getElementById('attackgen-system-desc').value,
+        };
+        attackgenRunBtn.disabled = true;
+        var origBtnHtml = attackgenRunBtn.innerHTML;
+        attackgenRunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…';
+        attackgenOutput.innerHTML = '<div class="attackgen-loading"><i class="fas fa-spinner fa-spin"></i> Crafting adversarial prompt…</div>';
+
+        fetch('/api/attack-generator', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (result) {
+                if (!result.ok) {
+                    attackgenOutput.innerHTML = '<div class="attackgen-card attackgen-error"><i class="fas fa-exclamation-triangle"></i> ' + escapeAttackHtml(result.data.message || result.data.error || 'Request failed') + '</div>';
+                    return;
+                }
+                renderAttackResult(result.data);
+            })
+            .catch(function (e) {
+                attackgenOutput.innerHTML = '<div class="attackgen-card attackgen-error"><i class="fas fa-exclamation-triangle"></i> Network error: ' + escapeAttackHtml(e.message) + '</div>';
+            })
+            .finally(function () {
+                attackgenRunBtn.disabled = false;
+                attackgenRunBtn.innerHTML = origBtnHtml;
+            });
     }
 
-    // Event listeners
-    var aivshuModal = document.getElementById('aivshu-modal');
-    document.getElementById('open-aivshu-btn').addEventListener('click', function () {
-        aivshuModal.classList.add('active');
-        aivshuStart();
+    document.getElementById('open-attackgen-btn').addEventListener('click', function () {
+        attackgenModal.classList.add('active');
     });
-    document.getElementById('aivshu-modal-close').addEventListener('click', function () {
-        aivshuModal.classList.remove('active');
+    document.getElementById('attackgen-modal-close').addEventListener('click', function () {
+        attackgenModal.classList.remove('active');
     });
-    aivshuModal.querySelector('.modal-overlay').addEventListener('click', function () {
-        aivshuModal.classList.remove('active');
+    attackgenModal.querySelector('.modal-overlay').addEventListener('click', function () {
+        attackgenModal.classList.remove('active');
     });
-    document.querySelectorAll('.aivshu-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () { aivshuAnswer(this.dataset.answer); });
+    attackgenRunBtn.addEventListener('click', runAttackGenerator);
+    attackgenClearBtn.addEventListener('click', function () {
+        attackgenOutput.innerHTML = '';
+        document.getElementById('attackgen-system-desc').value = '';
     });
-    document.getElementById('aivshu-next-btn').addEventListener('click', function () {
-        aivshuState.round++;
-        aivshuShowRound();
-    });
-    document.getElementById('aivshu-replay-btn').addEventListener('click', aivshuStart);
 
 })();

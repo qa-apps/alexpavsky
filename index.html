@@ -360,11 +360,11 @@
                     </button>
                 </div>
                 <div class="lab-card" data-animate>
-                    <div class="lab-icon"><i class="fas fa-user-secret"></i></div>
-                    <h3>AI or Human?</h3>
-                    <p>Can you tell if code was written by AI or a human? Test your instincts.</p>
-                    <button class="btn btn-glass btn-sm" id="open-aivshu-btn">
-                        <i class="fas fa-play"></i> Play
+                    <div class="lab-icon" style="color:#ef4444"><i class="fas fa-crosshairs"></i></div>
+                    <h3>Attack Generator</h3>
+                    <p>Generate realistic adversarial prompts for AI red teaming. Pick industry, target, attack type, severity — get production-grade payloads.</p>
+                    <button class="btn btn-glass btn-sm" id="open-attackgen-btn">
+                        <i class="fas fa-bolt"></i> Generate
                     </button>
                 </div>
                 <div class="lab-card challenge-card" id="challenge" data-animate>
@@ -489,34 +489,96 @@
         </div>
     </section>
 
-    <!-- AI vs Human Game -->
-    <div class="json-modal" id="aivshu-modal">
+    <!-- Attack Generator -->
+    <div class="json-modal" id="attackgen-modal">
         <div class="modal-overlay"></div>
-        <div class="modal-content aivshu-content">
+        <div class="modal-content modal-wide attackgen-content">
             <div class="modal-header">
-                <h3><i class="fas fa-user-secret"></i> AI or Human?</h3>
-                <div class="aivshu-score">Round <span id="aivshu-round">1</span>/10 &nbsp; Score: <span id="aivshu-score">0</span></div>
-                <button class="modal-close" id="aivshu-modal-close"><i class="fas fa-times"></i></button>
+                <h3><i class="fas fa-crosshairs" style="color:#ef4444"></i> Attack Generator</h3>
+                <button class="modal-close" id="attackgen-modal-close"><i class="fas fa-times"></i></button>
             </div>
-            <div class="modal-body aivshu-body">
-                <div class="aivshu-prompt">Who wrote this code?</div>
-                <pre class="aivshu-code" id="aivshu-code"></pre>
-                <div class="aivshu-buttons" id="aivshu-buttons">
-                    <button class="btn btn-glass aivshu-btn" data-answer="human"><i class="fas fa-user"></i> Human</button>
-                    <button class="btn btn-glass aivshu-btn" data-answer="ai"><i class="fas fa-robot"></i> AI Generated</button>
+            <div class="modal-body attackgen-body">
+                <div class="attackgen-disclaimer">
+                    <i class="fas fa-shield-alt"></i>
+                    For authorized red-team testing only. Use against systems you own or have explicit permission to test.
                 </div>
-                <div class="aivshu-feedback" id="aivshu-feedback" style="display:none">
-                    <div class="aivshu-feedback-icon" id="aivshu-feedback-icon"></div>
-                    <div class="aivshu-feedback-text" id="aivshu-feedback-text"></div>
-                    <div class="aivshu-explanation" id="aivshu-explanation"></div>
-                    <button class="btn btn-primary btn-sm" id="aivshu-next-btn"><i class="fas fa-arrow-right"></i> Next</button>
+                <div class="attackgen-form">
+                    <div class="attackgen-row">
+                        <label>
+                            <span>Industry</span>
+                            <select id="attackgen-industry">
+                                <option value="healthcare">Healthcare</option>
+                                <option value="banking">Banking / Finance</option>
+                                <option value="hr">HR / Recruitment</option>
+                                <option value="legal">Legal</option>
+                                <option value="ecommerce">E-commerce / Retail</option>
+                                <option value="support" selected>Customer Support</option>
+                                <option value="cybersecurity">Cybersecurity / SOC</option>
+                                <option value="education">Education</option>
+                                <option value="code">Coding / Dev Assistant</option>
+                                <option value="agent">Autonomous Agent</option>
+                                <option value="other">Other / Generic</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Target Type</span>
+                            <select id="attackgen-target">
+                                <option value="Chatbot" selected>Chatbot</option>
+                                <option value="RAG Pipeline">RAG Pipeline</option>
+                                <option value="AI Agent">AI Agent (with tools)</option>
+                                <option value="Code Assistant">Code Assistant</option>
+                                <option value="Voice Assistant">Voice Assistant</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="attackgen-row">
+                        <label>
+                            <span>Attack Type</span>
+                            <select id="attackgen-attacktype">
+                                <option value="direct_injection" selected>Direct Prompt Injection</option>
+                                <option value="jailbreak">Jailbreak / Persona Hijack</option>
+                                <option value="crescendo">Crescendo (Multi-turn)</option>
+                                <option value="leaking">System Prompt Leaking</option>
+                                <option value="obfuscation">Obfuscation (Base64 / leet)</option>
+                                <option value="stealth_unicode">Unicode Stealth</option>
+                                <option value="indirect_rag">Indirect / RAG Injection</option>
+                                <option value="data_extraction">Data Extraction / PII</option>
+                                <option value="goal_hijack">Goal Hijacking</option>
+                                <option value="many_shot">Many-Shot Pattern Injection</option>
+                                <option value="authority">Authority Spoofing</option>
+                                <option value="agentic">Agentic Tool Hijacking</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Severity</span>
+                            <select id="attackgen-severity">
+                                <option value="Low">Low</option>
+                                <option value="Medium" selected>Medium</option>
+                                <option value="High">High</option>
+                                <option value="Critical">Critical</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Language</span>
+                            <select id="attackgen-language">
+                                <option value="en" selected>English</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label class="attackgen-fullwidth">
+                        <span>Target System Description (optional)</span>
+                        <textarea id="attackgen-system-desc" rows="2" placeholder="e.g. 'Internal HR chatbot that has access to candidate database and can schedule interviews via tool calls'"></textarea>
+                    </label>
+                    <div class="attackgen-actions">
+                        <button class="btn btn-primary btn-sm" id="attackgen-run-btn">
+                            <i class="fas fa-bolt"></i> Generate Attack
+                        </button>
+                        <button class="btn btn-glass btn-sm" id="attackgen-clear-btn">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
                 </div>
-                <div class="aivshu-final" id="aivshu-final" style="display:none">
-                    <div class="aivshu-final-icon" id="aivshu-final-icon"></div>
-                    <div class="aivshu-final-title" id="aivshu-final-title"></div>
-                    <div class="aivshu-final-score" id="aivshu-final-score"></div>
-                    <button class="btn btn-primary btn-sm" id="aivshu-replay-btn"><i class="fas fa-redo"></i> Play Again</button>
-                </div>
+                <div id="attackgen-output" class="attackgen-output"></div>
             </div>
         </div>
     </div>
@@ -705,6 +767,9 @@
                     </button>
                     <div class="chat-input-wrap">
                         <input type="text" id="chat-input" class="chat-input" placeholder="Type your message..." autocomplete="off">
+                        <div class="chat-voice-meter" aria-hidden="true">
+                            <span class="chat-voice-meter-wave"></span>
+                        </div>
                         <button type="button" id="chat-stop" class="chat-inline-btn chat-stop-btn" aria-label="Stop" title="Stop">
                             <i class="fas fa-stop"></i>
                         </button>
