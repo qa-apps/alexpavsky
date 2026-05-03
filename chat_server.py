@@ -1594,8 +1594,10 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
         if provider == "openrouter":
             base_url = OPENROUTER_API_URL
         elif provider == "huggingface":
-            base_url = f"https://api-inference.huggingface.co/models/{model['id']}/v1/chat/completions"
-            
+            # HF unified router endpoint (supports all HF models)
+            base_url = "https://router.huggingface.co/v1/chat/completions"
+            payload["model"] = model["id"]
+
         req = Request(base_url, data=json.dumps(payload).encode(), headers=headers, method="POST")
         with urlopen(req, timeout=25) as resp:
             return _extract_reply(json.loads(resp.read().decode())), None
