@@ -1605,6 +1605,8 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     transform: translateY(20px);
     position: relative;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 .lab-card::before {
     content: '';
@@ -1677,6 +1679,7 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     color: var(--text-secondary);
     line-height: 1.6;
     margin-bottom: 1.25rem;
+    flex-grow: 1;
 }
 
 /* ─── Modals ─── */
