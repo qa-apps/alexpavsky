@@ -133,19 +133,38 @@ def _hash_ip(ip):
 
 
 def _hash_pw(password, salt=None):
-    """Hash password with scrypt (salt stored as hex prefix)."""
+    """Hash password with scrypt, falling back to PBKDF2 where scrypt is unavailable."""
     if salt is None:
         salt = os.urandom(16)
-    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32)
-    return salt.hex() + ":" + dk.hex()
+    if hasattr(hashlib, "scrypt"):
+        dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32)
+        return "scrypt$" + salt.hex() + ":" + dk.hex()
+    rounds = 260000
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds, dklen=32)
+    return "pbkdf2$" + str(rounds) + "$" + salt.hex() + ":" + dk.hex()
 
 
 def _verify_pw(password, stored_hash):
-    """Verify password against stored scrypt hash. Falls back to legacy SHA-256."""
+    """Verify password against stored hashes. Falls back to legacy SHA-256."""
+    if stored_hash.startswith("pbkdf2$"):
+        try:
+            _, rounds, rest = stored_hash.split("$", 2)
+            salt_hex, expected = rest.split(":", 1)
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(rounds), dklen=32)
+            return dk.hex() == expected
+        except Exception:
+            return False
+    if stored_hash.startswith("scrypt$"):
+        if not hasattr(hashlib, "scrypt"):
+            return False
+        stored_hash = stored_hash.replace("scrypt$", "", 1)
     if ":" in stored_hash:
+        if not hasattr(hashlib, "scrypt"):
+            return False
         salt_hex, _ = stored_hash.split(":", 1)
         salt = bytes.fromhex(salt_hex)
-        return _hash_pw(password, salt) == stored_hash
+        dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32)
+        return salt.hex() + ":" + dk.hex() == stored_hash
     # Legacy SHA-256 fallback for existing accounts
     return hashlib.sha256(password.encode("utf-8")).hexdigest() == stored_hash
 
@@ -173,7 +192,7 @@ def _admin_login_emails():
         os.environ.get("ADMIN_LOGIN_EMAILS")
         or os.environ.get("ADMIN_LOGIN_EMAIL")
         or os.environ.get("ADMIN_EMAIL")
-        or "alex.pavsky@gmail.com"
+        or "alex@alexpavsky.com,alex.pavsky@gmail.com"
     )
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
@@ -515,7 +534,7 @@ def _mail_transport_config():
             or os.environ.get("NEWSLETTER_FROM_NAME")
             or "Alex Pavsky"
         ).strip() or "Alex Pavsky",
-        "admin_email": (os.environ.get("ADMIN_EMAIL") or "alex.pavsky@gmail.com").strip() or "alex.pavsky@gmail.com",
+        "admin_email": (os.environ.get("ADMIN_EMAIL") or "alex@alexpavsky.com").strip() or "alex@alexpavsky.com",
         "use_ssl": os.environ.get("SMTP_USE_SSL", "1").strip().lower() not in ("0", "false", "no"),
         "use_starttls": os.environ.get("SMTP_USE_STARTTLS", "0").strip().lower() in ("1", "true", "yes"),
     }
@@ -686,6 +705,8 @@ def _newsletter_fetch_articles(days=7, per_source=4):
                 seen_links.add(link)
                 title = (item.get("title") or "Untitled").strip()
                 description = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", item.get("description") or "")).strip()
+                if not _feed_is_english(title, description):
+                    continue
                 articles.append({
                     "title": title,
                     "link": link,
@@ -885,10 +906,10 @@ def _admin_conversations():
             COUNT(m.id) AS message_count,
             MAX(m.created_at) AS last_message_at,
             (
-                SELECT sender FROM messages WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
+                SELECT sender FROM messages WHERE user_id = u.id AND sender != 'system' ORDER BY created_at DESC LIMIT 1
             ) AS last_sender,
             (
-                SELECT text FROM messages WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1
+                SELECT text FROM messages WHERE user_id = u.id AND sender != 'system' ORDER BY created_at DESC LIMIT 1
             ) AS last_text
         FROM users u
         LEFT JOIN messages m ON m.user_id = u.id
@@ -1176,6 +1197,38 @@ def _feed_extract_nodes(root, target_name):
     return [node for node in root.iter() if _feed_tag_name(node.tag) == target_name]
 
 
+_NON_ENGLISH_SCRIPT_RE = re.compile(
+    r"[Ͱ-Ͽ"      # Greek
+    r"Ѐ-ӿ"       # Cyrillic
+    r"Ԁ-ԯ"       # Cyrillic Supplement
+    r"֐-׿"       # Hebrew
+    r"؀-ۿ"       # Arabic
+    r"܀-ݏ"       # Syriac
+    r"ऀ-ॿ"       # Devanagari
+    r"฀-๿"       # Thai
+    r"぀-ヿ"       # Hiragana, Katakana
+    r"㐀-䶿"       # CJK Ext A
+    r"一-鿿"       # CJK Unified
+    r"가-힯"       # Hangul
+    r"＀-￯"       # Halfwidth/Fullwidth
+    r"]"
+)
+
+# Letters that uniquely identify Vietnamese (not used by any major Western European language)
+_VIETNAMESE_LETTERS_RE = re.compile(r"[ăâđêôơưĂÂĐÊÔƠƯ]")
+
+
+def _feed_is_english(title, description=""):
+    text = (title or "") + " " + (description or "")
+    if not text.strip():
+        return True
+    if _NON_ENGLISH_SCRIPT_RE.search(text):
+        return False
+    if _VIETNAMESE_LETTERS_RE.search(text):
+        return False
+    return True
+
+
 def _feed_fetch_source(source, limit=18):
     req = Request(
         source["url"],
@@ -1227,6 +1280,8 @@ def _feed_collect_articles():
                 continue
             published_at = _newsletter_parse_date(item["date"])
             if not published_at or published_at < cutoff:
+                continue
+            if not _feed_is_english(item.get("title"), item.get("description")):
                 continue
             seen_links.add(item["link"])
             articles.append(item)
@@ -1641,9 +1696,20 @@ class Handler(SimpleHTTPRequestHandler):
         "http://127.0.0.1:8000",
     }
 
+    def _origin_allowed(self, origin):
+        if origin in self._ALLOWED_ORIGINS:
+            return True
+        try:
+            parsed = urlparse(origin)
+        except Exception:
+            return False
+        if parsed.scheme != "http":
+            return False
+        return parsed.hostname in {"localhost", "127.0.0.1"} and bool(parsed.port)
+
     def _cors(self):
         origin = self.headers.get("Origin", "")
-        allowed = origin if origin in self._ALLOWED_ORIGINS else "https://alexpavsky.com"
+        allowed = origin if self._origin_allowed(origin) else "https://alexpavsky.com"
         self.send_header("Access-Control-Allow-Origin", allowed)
         self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -2455,25 +2521,30 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(400, {"error": "Message text required."})
             return
         mid = uuid.uuid4().hex
-        admin_mid = uuid.uuid4().hex
         now = time.time()
-        admin_text = "Thanks. Your message was sent to Alex. You'll get a personal reply here and by email."
+        system_mid = uuid.uuid4().hex
+        email_ready = _mail_transport_ready()
+        system_text = (
+            "Thanks. Your message was sent to Alex. You'll get a personal reply here in your dashboard."
+            if not email_ready
+            else "Thanks. Your message was sent to Alex. You'll get a personal reply here in your dashboard. Alex was notified by email."
+        )
         conn = _db()
         conn.execute(
             "INSERT INTO messages (id, user_id, sender, text, created_at) VALUES (?, ?, 'user', ?, ?)",
             (mid, user["id"], text, now),
         )
         conn.execute(
-            "INSERT INTO messages (id, user_id, sender, text, created_at) VALUES (?, ?, 'admin', ?, ?)",
-            (admin_mid, user["id"], admin_text, now + 0.001),
+            "INSERT INTO messages (id, user_id, sender, text, created_at) VALUES (?, ?, 'system', ?, ?)",
+            (system_mid, user["id"], system_text, now + 0.001),
         )
         conn.commit()
         conn.close()
-        if _mail_transport_ready():
+        if email_ready:
             _send_async(_send_admin_notification, user["name"], user["email"], text)
         self._json(200, {
             "message": {"id": mid, "sender": "user", "text": text, "created_at": now},
-            "email_ready": _mail_transport_ready(),
+            "email_ready": email_ready,
         })
 
     def _handle_admin_reply(self):
