@@ -2450,7 +2450,8 @@ class Handler(SimpleHTTPRequestHandler):
             chain = _get_fallback_chain(model, tier)
             for fallback in chain[:6]:
                 log.info("fallback: %s -> %s (%s)", model["label"], fallback["label"], fallback["provider"])
-                reply, err = _call_model(fallback, SYSTEM_PROMPT, user_content, max_tok, history)
+                fallback_content, _ = _build_content(message, attachments, fallback["id"])
+                reply, err = _call_model(fallback, SYSTEM_PROMPT, fallback_content, max_tok, history)
                 if reply and reply.strip():
                     model = fallback
                     break
