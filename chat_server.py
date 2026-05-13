@@ -1,4 +1,6 @@
+import base64
 import hashlib
+import io
 import json
 import logging
 import os
@@ -10,6 +12,7 @@ import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -1410,6 +1413,37 @@ SYSTEM_PROMPT = (
     "Answer in the user's language when possible."
 )
 
+PROMPT_EXTRACTION_RE = re.compile(
+    r"(?:system|developer|hidden|internal)\s+(?:prompt|instruction|message)|"
+    r"(?:print|show|reveal|repeat|dump|verbatim|full)\s+.*(?:prompt|instruction|message)|"
+    r"ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions",
+    re.IGNORECASE | re.DOTALL,
+)
+
+PROMPT_EXTRACTION_REFUSAL = (
+    "I can't reveal or repeat hidden system instructions. "
+    "I can still help with safe prompt design, AI testing, or red-team evaluation."
+)
+
+HARMFUL_REQUEST_RE = re.compile(
+    r"phishing|social\s+engineering|stolen\s+(?:credit\s+)?card|credit\s+card\s+(?:fraud|numbers)|"
+    r"fake\s+investment|ransomware|malware|steal\s+session|session\s+cookies|"
+    r"\bXSS\b|hack\s+into\s+a\s+secure\s+website|break\s+into\s+a\s+house|"
+    r"synthesi[sz]e\s+methamphetamine|methamphetamine\s+at\s+home|"
+    r"improvised\s+explosive\s+device|build\s+(?:an?\s+)?(?:bomb|explosive)|"
+    r"transport\s+people\s+across\s+borders\s+illegally|human\s+traffick|"
+    r"deepfake\s+video\s+of\s+a\s+politician|autonomously\s+(?:select\s+and\s+)?engage\s+human\s+targets|"
+    r"employee\s+keystrokes.*without\s+their\s+knowledge|fake\s+news\s+articles.*political|"
+    r"stolen\s+social\s+security\s+numbers|rank(?:ing)?\s+ethnic\s+groups\s+by\s+intelligence",
+    re.IGNORECASE | re.DOTALL,
+)
+
+HARMFUL_REQUEST_REFUSAL = (
+    "I can't help create or facilitate phishing, fraud, malware, privacy invasion, violence, "
+    "discrimination, exploitation, or other harmful activity. I can help with defensive security, "
+    "safety testing, incident response, or awareness training."
+)
+
 _COMPLEX = re.compile(
     r"(?:анализ|проанализируй|сравни|compare|analyze|explain\s+in\s+detail|"
     r"step[\s-]by[\s-]step|пошагов|таблиц|table|"
@@ -1516,6 +1550,21 @@ def _clean(val, limit):
     return val.strip()[:limit] if isinstance(val, str) else ""
 
 
+def _extract_docx_text(data_url: str, max_chars: int = 8000) -> str:
+    try:
+        raw = data_url.split(",", 1)[1] if "," in data_url else data_url
+        buf = io.BytesIO(base64.b64decode(raw))
+        with zipfile.ZipFile(buf) as z:
+            if "word/document.xml" not in z.namelist():
+                return ""
+            xml_bytes = z.read("word/document.xml")
+        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        chunks = [e.text for e in ET.fromstring(xml_bytes).iter(f"{{{ns}}}t") if e.text]
+        return " ".join(chunks).strip()[:max_chars]
+    except Exception:
+        return ""
+
+
 def _sanitize_attachments(items):
     if not isinstance(items, list):
         return []
@@ -1535,6 +1584,10 @@ def _sanitize_attachments(items):
             if len(text) > MAX_TEXT_CHARS:
                 text, trunc = text[:MAX_TEXT_CHARS], True
             out.append({**base, "kind": "text", "text": text, "truncated": trunc})
+        elif kind == "doc":
+            url = item.get("data_url")
+            if isinstance(url, str) and len(url) <= MAX_IMAGE_URL_CHARS * 2:
+                out.append({**base, "kind": "doc", "data_url": url})
         else:
             out.append({**base, "kind": "file"})
     return out
@@ -1562,6 +1615,12 @@ def _build_content(message, attachments, model_id):
                 text_blocks.append(chunk)
             else:
                 file_notes.append(f"file: {name}")
+        elif kind == "doc":
+            text = _extract_docx_text(a.get("data_url", ""))
+            if text:
+                text_blocks.append(f"[Attached document: {name}]\n{text}")
+            else:
+                file_notes.append(f"document: {name} (could not extract text)")
         else:
             file_notes.append(f"file: {name} ({a.get('type', '?')})")
     if text_blocks:
@@ -2372,6 +2431,18 @@ class Handler(SimpleHTTPRequestHandler):
         user_content, warning = _build_content(message, attachments, model["id"])
 
         log.info("route: %s tier=%s reason=%s sid=%s", model["label"], tier, reason, session_id[:8])
+
+        if PROMPT_EXTRACTION_RE.search(message or ""):
+            reply = PROMPT_EXTRACTION_REFUSAL
+            _log_message(session_id, ip_hash, "assistant", reply, "guardrail")
+            self._json(200, {"reply": reply}, new_session)
+            return
+
+        if HARMFUL_REQUEST_RE.search(message or ""):
+            reply = HARMFUL_REQUEST_REFUSAL
+            _log_message(session_id, ip_hash, "assistant", reply, "guardrail")
+            self._json(200, {"reply": reply}, new_session)
+            return
 
         reply, err = _call_model(model, SYSTEM_PROMPT, user_content, max_tok, history)
 

@@ -148,6 +148,13 @@
         });
     }
 
+    function apiUrl(path) {
+        var localHosts = { localhost: true, '127.0.0.1': true, '0.0.0.0': true };
+        var isLocalPreview = localHosts[window.location.hostname] && window.location.port && window.location.port !== '8000';
+        var base = isLocalPreview ? 'http://127.0.0.1:8000' : '';
+        return path.indexOf('/api/') === 0 ? base + path : path;
+    }
+
     async function fetchTextWithTimeout(url, options, timeoutMs) {
         var response = await Promise.race([
             fetch(url, options || {}),
@@ -343,7 +350,7 @@
     // ─── RSS Feed ───
     async function fetchFeed(source) {
         try {
-            var resp = await fetch('/api/feed?source=' + encodeURIComponent(source.url));
+            var resp = await fetch(apiUrl('/api/feed?source=' + encodeURIComponent(source.url)));
             if (!resp.ok) return [];
             var data = await resp.json();
             if (!data.articles) return [];
@@ -713,7 +720,7 @@
         }
         var articles = [];
         try {
-            var response = await fetch('/api/feed');
+            var response = await fetch(apiUrl('/api/feed'));
             if (!response.ok) throw new Error('feed_request_failed');
             var data = await response.json();
             articles = Array.isArray(data.articles) ? data.articles : [];
@@ -815,7 +822,7 @@
             descEl.classList.add('article-loading');
             if (heroEl) heroEl.style.backgroundImage = '';
             // Fetch full article content via proxy
-            fetch('/api/article-proxy?url=' + encodeURIComponent(url))
+            fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(url)))
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     descEl.classList.remove('article-loading');
@@ -1198,7 +1205,7 @@
             renderYoutubeCarousel(YOUTUBE_FALLBACK_VIDEOS);
             var videos = [];
             try {
-                var res = await fetch('/api/youtube');
+                var res = await fetch(apiUrl('/api/youtube'));
                 var data = await res.json();
                 videos = (data.videos || []);
             } catch (apiErr) {
@@ -1500,7 +1507,7 @@
             output.innerHTML = '<div class="hallucination-loading"><div class="spinner"></div><p>Analysing response with LLM judge\u2026</p></div>';
             runBtn.disabled = true;
             try {
-                var res = await fetch('/api/hallucination', {
+                var res = await fetch(apiUrl('/api/hallucination'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ context: context, prompt: prompt, answer: answer })
@@ -1594,7 +1601,7 @@
             newsletterMsg.textContent = '';
             newsletterMsg.className = 'newsletter-msg';
             try {
-                var res = await fetch('/api/subscribe', {
+                var res = await fetch(apiUrl('/api/subscribe'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: email })
@@ -1620,6 +1627,7 @@
     var userMenu = document.getElementById('user-menu');
     var userMenuToggle = document.getElementById('user-menu-toggle');
     var userDropdown = document.getElementById('user-dropdown');
+    var adminDashboardLink = document.getElementById('admin-dashboard-link');
     var userDisplayName = document.getElementById('user-display-name');
     var authOverlay = document.getElementById('auth-overlay');
     var authModalClose = document.getElementById('auth-modal-close');
@@ -1642,6 +1650,8 @@
         if (authBtn) authBtn.style.display = 'none';
         if (userMenu) userMenu.style.display = '';
         if (userDisplayName) userDisplayName.textContent = user.name.split(' ')[0];
+        if (dashboardLink) dashboardLink.style.display = user.is_admin ? 'none' : '';
+        if (adminDashboardLink) adminDashboardLink.style.display = user.is_admin ? '' : 'none';
     }
 
     function setLoggedOut() {
@@ -1650,6 +1660,8 @@
         localStorage.removeItem('auth_token');
         if (authBtn) authBtn.style.display = '';
         if (userMenu) userMenu.style.display = 'none';
+        if (dashboardLink) dashboardLink.style.display = '';
+        if (adminDashboardLink) adminDashboardLink.style.display = 'none';
         if (userDropdown) userDropdown.classList.remove('open');
     }
 
@@ -1667,7 +1679,7 @@
     function closeAuthModal() { if (authOverlay) authOverlay.classList.remove('open'); }
 
     if (authToken) {
-        fetch('/api/auth/me', { headers: authHeaders() })
+        fetch(apiUrl('/api/auth/me'), { headers: authHeaders() })
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.id) setLoggedIn(data, authToken);
@@ -1692,7 +1704,7 @@
             var password = document.getElementById('login-password').value;
             var btn = loginForm.querySelector('.auth-submit');
             btn.disabled = true;
-            fetch('/api/auth/login', {
+            fetch(apiUrl('/api/auth/login'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: email, password: password })
@@ -1720,7 +1732,7 @@
             if (pw !== pw2) { registerError.textContent = 'Passwords do not match.'; return; }
             var btn = registerForm.querySelector('.auth-submit');
             btn.disabled = true;
-            fetch('/api/auth/register', {
+            fetch(apiUrl('/api/auth/register'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: name, email: email, password: pw })
@@ -1745,12 +1757,310 @@
             if (userDropdown) userDropdown.classList.remove('open');
         }
     });
+
+    var dashboardLink = document.getElementById('user-dashboard-link');
+    var dashboardOverlay = document.getElementById('user-dashboard-overlay');
+    var dashboardClose = document.getElementById('user-dashboard-close');
+    var dashboardThread = document.getElementById('dashboard-thread');
+    var dashboardForm = document.getElementById('dashboard-message-form');
+    var dashboardInput = document.getElementById('dashboard-message-input');
+    var dashboardStatus = document.getElementById('dashboard-status');
+    var dashboardUserMeta = document.getElementById('dashboard-user-meta');
+
+    function formatDashboardTime(ts) {
+        if (!ts) return '';
+        var d = new Date(ts * 1000);
+        return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function setDashboardStatus(text, type) {
+        if (!dashboardStatus) return;
+        dashboardStatus.textContent = text || '';
+        dashboardStatus.className = 'dashboard-status' + (type ? ' ' + type : '');
+    }
+
+    function renderDashboardMessages(messages) {
+        if (!dashboardThread) return;
+        if (!messages || !messages.length) {
+            dashboardThread.innerHTML = '<div class="dashboard-empty">No messages yet.</div>';
+            return;
+        }
+        dashboardThread.innerHTML = messages.map(function (m) {
+            var sender = m.sender === 'user' ? 'user' : 'admin';
+            return '<div class="dashboard-message ' + sender + '">' +
+                '<div>' + escapeHtml(m.text || '') + '</div>' +
+                '<div class="dashboard-message-time">' + escapeHtml(formatDashboardTime(m.created_at)) + '</div>' +
+                '</div>';
+        }).join('');
+        dashboardThread.scrollTop = dashboardThread.scrollHeight;
+    }
+
+    function loadDashboardMessages() {
+        if (!authToken) return Promise.resolve();
+        setDashboardStatus('Loading...', '');
+        return fetch(apiUrl('/api/user/messages'), { headers: authHeaders() })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (!res.ok) throw new Error(res.data.error || 'Failed to load dashboard.');
+                renderDashboardMessages(res.data.messages || []);
+                setDashboardStatus('', '');
+            })
+            .catch(function () {
+                setDashboardStatus('Could not load messages.', 'error');
+            });
+    }
+
+    function openDashboard() {
+        if (!dashboardOverlay) return;
+        if (dashboardUserMeta && currentUser) {
+            dashboardUserMeta.textContent = currentUser.name + ' - ' + currentUser.email;
+        }
+        dashboardOverlay.classList.add('open');
+        loadDashboardMessages();
+    }
+
+    function closeDashboard() {
+        if (dashboardOverlay) dashboardOverlay.classList.remove('open');
+        setDashboardStatus('', '');
+    }
+
+    if (dashboardLink) {
+        dashboardLink.addEventListener('click', function (e) {
+            e.preventDefault();
+            if (userDropdown) userDropdown.classList.remove('open');
+            if (currentUser && currentUser.is_admin) {
+                openAdminDashboard();
+                return;
+            }
+            openDashboard();
+        });
+    }
+    if (dashboardClose) dashboardClose.addEventListener('click', closeDashboard);
+    if (dashboardOverlay) {
+        dashboardOverlay.addEventListener('click', function (e) {
+            if (e.target === dashboardOverlay) closeDashboard();
+        });
+    }
+    if (dashboardForm) {
+        dashboardForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var text = (dashboardInput.value || '').trim();
+            if (!text) return;
+            var btn = dashboardForm.querySelector('.dashboard-send-btn');
+            if (btn) btn.disabled = true;
+            setDashboardStatus('Sending...', '');
+            fetch(apiUrl('/api/user/messages'), {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ text: text })
+            })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (!res.ok) throw new Error(res.data.error || 'Message failed.');
+                dashboardInput.value = '';
+                setDashboardStatus('Sent.', 'success');
+                return loadDashboardMessages();
+            })
+            .catch(function () {
+                setDashboardStatus('Message failed.', 'error');
+            })
+            .finally(function () {
+                if (btn) btn.disabled = false;
+            });
+        });
+    }
+
+    var adminDashboardOverlay = document.getElementById('admin-dashboard-overlay');
+    var adminDashboardClose = document.getElementById('admin-dashboard-close');
+    var adminDashboardRefresh = document.getElementById('admin-dashboard-refresh');
+    var adminConversationList = document.getElementById('admin-conversation-list');
+    var adminThreadTitle = document.getElementById('admin-thread-title');
+    var adminThreadMeta = document.getElementById('admin-thread-meta');
+    var adminThreadMessages = document.getElementById('admin-thread-messages');
+    var adminReplyForm = document.getElementById('admin-reply-form');
+    var adminReplyInput = document.getElementById('admin-reply-input');
+    var adminReplyStatus = document.getElementById('admin-reply-status');
+    var adminEmailStatus = document.getElementById('admin-email-status');
+    var adminConversations = [];
+    var adminSelectedUserId = '';
+
+    function setAdminReplyStatus(text, type) {
+        if (!adminReplyStatus) return;
+        adminReplyStatus.textContent = text || '';
+        adminReplyStatus.className = 'dashboard-status' + (type ? ' ' + type : '');
+    }
+
+    function renderAdminConversations() {
+        if (!adminConversationList) return;
+        if (!adminConversations.length) {
+            adminConversationList.innerHTML = '<div class="dashboard-empty">No client conversations yet.</div>';
+            return;
+        }
+        adminConversationList.innerHTML = adminConversations.map(function (c) {
+            var active = c.id === adminSelectedUserId ? ' active' : '';
+            return '<button type="button" class="admin-conversation-item' + active + '" data-user-id="' + escapeHtml(c.id) + '">' +
+                '<div class="admin-conversation-top">' +
+                '<span class="admin-conversation-name">' + escapeHtml(c.name || 'User') + '</span>' +
+                '<span class="admin-conversation-time">' + escapeHtml(formatDashboardTime(c.last_message_at || c.created_at)) + '</span>' +
+                '</div>' +
+                '<div class="admin-conversation-email">' + escapeHtml(c.email || '') + '</div>' +
+                '<div class="admin-conversation-preview">' + escapeHtml(c.last_text || 'No messages yet') + '</div>' +
+                '</button>';
+        }).join('');
+        adminConversationList.querySelectorAll('.admin-conversation-item').forEach(function (el) {
+            el.addEventListener('click', function () {
+                openAdminConversation(el.dataset.userId);
+            });
+        });
+    }
+
+    function renderAdminThread(data) {
+        if (!adminThreadMessages) return;
+        if (!data || !data.user) {
+            if (adminThreadTitle) adminThreadTitle.textContent = 'Select a conversation';
+            if (adminThreadMeta) adminThreadMeta.textContent = 'Replies are stored in the user dashboard.';
+            adminThreadMessages.innerHTML = '<div class="dashboard-empty">Choose a user on the left.</div>';
+            return;
+        }
+        if (adminThreadTitle) adminThreadTitle.textContent = data.user.name + ' - ' + data.user.email;
+        if (adminThreadMeta) adminThreadMeta.textContent = 'Reply here. Email is sent only if SMTP is configured.';
+        var messages = data.messages || [];
+        if (!messages.length) {
+            adminThreadMessages.innerHTML = '<div class="dashboard-empty">No messages yet for this user.</div>';
+            return;
+        }
+        adminThreadMessages.innerHTML = messages.map(function (m) {
+            var sender = m.sender === 'user' ? 'user' : 'admin';
+            return '<div class="dashboard-message ' + sender + '">' +
+                '<div>' + escapeHtml(m.text || '') + '</div>' +
+                '<div class="dashboard-message-time">' + escapeHtml(formatDashboardTime(m.created_at)) + '</div>' +
+                '</div>';
+        }).join('');
+        adminThreadMessages.scrollTop = adminThreadMessages.scrollHeight;
+    }
+
+    function loadAdminEmailStatus() {
+        if (!adminEmailStatus) return Promise.resolve();
+        adminEmailStatus.textContent = 'Checking email setup...';
+        return fetch(apiUrl('/api/admin/email-status'), { headers: authHeaders() })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (!res.ok) throw new Error(res.data.error || 'email_status_failed');
+                adminEmailStatus.textContent = res.data.ready
+                    ? 'Email notifications ready: ' + res.data.admin
+                    : 'Email not configured. Dashboard inbox is active.';
+            })
+            .catch(function () {
+                adminEmailStatus.textContent = 'Admin email status unavailable.';
+            });
+    }
+
+    function loadAdminConversations(preferredUserId) {
+        if (!adminConversationList) return Promise.resolve();
+        adminConversationList.innerHTML = '<div class="dashboard-empty">Loading conversations...</div>';
+        return fetch(apiUrl('/api/admin/conversations'), { headers: authHeaders() })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (!res.ok) throw new Error(res.data.error || 'Failed to load conversations.');
+                adminConversations = res.data.conversations || [];
+                adminSelectedUserId = preferredUserId || adminSelectedUserId || (adminConversations[0] && adminConversations[0].id) || '';
+                renderAdminConversations();
+                if (adminSelectedUserId) return openAdminConversation(adminSelectedUserId, true);
+                renderAdminThread(null);
+            })
+            .catch(function () {
+                adminConversationList.innerHTML = '<div class="dashboard-empty">Could not load conversations.</div>';
+            });
+    }
+
+    function openAdminConversation(userId, skipListRender) {
+        adminSelectedUserId = userId;
+        if (!skipListRender) renderAdminConversations();
+        if (!userId) {
+            renderAdminThread(null);
+            return Promise.resolve();
+        }
+        if (adminThreadMessages) adminThreadMessages.innerHTML = '<div class="dashboard-empty">Loading thread...</div>';
+        return fetch(apiUrl('/api/admin/messages?user_id=' + encodeURIComponent(userId)), { headers: authHeaders() })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (!res.ok) throw new Error(res.data.error || 'Failed to load thread.');
+                renderAdminThread(res.data);
+            })
+            .catch(function () {
+                if (adminThreadMessages) adminThreadMessages.innerHTML = '<div class="dashboard-empty">Could not load thread.</div>';
+            });
+    }
+
+    function openAdminDashboard() {
+        if (!adminDashboardOverlay) return;
+        adminDashboardOverlay.classList.add('open');
+        setAdminReplyStatus('', '');
+        loadAdminEmailStatus();
+        loadAdminConversations(adminSelectedUserId);
+    }
+
+    function closeAdminDashboard() {
+        if (adminDashboardOverlay) adminDashboardOverlay.classList.remove('open');
+        setAdminReplyStatus('', '');
+    }
+
+    if (adminDashboardLink) {
+        adminDashboardLink.addEventListener('click', function (e) {
+            e.preventDefault();
+            if (userDropdown) userDropdown.classList.remove('open');
+            openAdminDashboard();
+        });
+    }
+    if (adminDashboardClose) adminDashboardClose.addEventListener('click', closeAdminDashboard);
+    if (adminDashboardRefresh) {
+        adminDashboardRefresh.addEventListener('click', function () {
+            loadAdminEmailStatus();
+            loadAdminConversations(adminSelectedUserId);
+        });
+    }
+    if (adminDashboardOverlay) {
+        adminDashboardOverlay.addEventListener('click', function (e) {
+            if (e.target === adminDashboardOverlay) closeAdminDashboard();
+        });
+    }
+    if (adminReplyForm) {
+        adminReplyForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var text = (adminReplyInput.value || '').trim();
+            if (!adminSelectedUserId || !text) return;
+            var btn = adminReplyForm.querySelector('.dashboard-send-btn');
+            if (btn) btn.disabled = true;
+            setAdminReplyStatus('Sending...', '');
+            fetch(apiUrl('/api/admin/reply'), {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ user_id: adminSelectedUserId, text: text })
+            })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (!res.ok) throw new Error(res.data.error || 'Reply failed.');
+                adminReplyInput.value = '';
+                setAdminReplyStatus(res.data.email_ready ? 'Reply sent and emailed.' : 'Reply sent to dashboard.', 'success');
+                return Promise.all([openAdminConversation(adminSelectedUserId), loadAdminConversations(adminSelectedUserId)]);
+            })
+            .catch(function () {
+                setAdminReplyStatus('Reply failed.', 'error');
+            })
+            .finally(function () {
+                if (btn) btn.disabled = false;
+            });
+        });
+    }
+
     var logoutLink = document.getElementById('user-logout-link');
     if (logoutLink) {
         logoutLink.addEventListener('click', function(e) {
             e.preventDefault();
-            fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {});
+            fetch(apiUrl('/api/auth/logout'), { method: 'POST', headers: authHeaders() }).catch(function() {});
             setLoggedOut();
+            closeDashboard();
+            closeAdminDashboard();
         });
     }
 
@@ -2512,6 +2822,11 @@
             return ['.txt', '.md', '.csv', '.json', '.xml', '.yml', '.yaml'].some(function (ext) { return name.endsWith(ext); });
         }
 
+        function isDocFile(file) {
+            var name = (file.name || '').toLowerCase();
+            return ['.docx', '.pdf'].some(function (ext) { return name.endsWith(ext); });
+        }
+
         function readAsDataUrl(file) {
             return new Promise(function (resolve, reject) {
                 var reader = new FileReader();
@@ -2533,6 +2848,9 @@
                         return Object.assign(base, { kind: 'text', text: truncated ? text.slice(0, maxTextChars) : text, truncated: truncated });
                     });
                 }
+                if (isDocFile(file)) {
+                    return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                }
                 return Promise.resolve(Object.assign(base, { kind: 'file' }));
             });
             return Promise.all(promises);
@@ -2550,11 +2868,42 @@
             scrollToBottom();
         }
 
+        function renderBotMarkdown(text) {
+            var html = escapeHtml(text);
+            html = html.replace(/```([\s\S]*?)```/g, function (_, code) {
+                return '<pre>' + code.replace(/^\n/, '') + '</pre>';
+            });
+            html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+            html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+            html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+            html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+            html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+            html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+            html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+            html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+            html = html.replace(/(?:^|\n)((?:[-*] .+(?:\n|$))+)/g, function (_, block) {
+                var items = block.replace(/\n$/, '').split('\n').map(function (l) {
+                    return '<li>' + l.replace(/^[-*] /, '') + '</li>';
+                }).join('');
+                return '\n<ul>' + items + '</ul>';
+            });
+            html = html.replace(/(?:^|\n)((?:\d+\. .+(?:\n|$))+)/g, function (_, block) {
+                var items = block.replace(/\n$/, '').split('\n').map(function (l) {
+                    return '<li>' + l.replace(/^\d+\. /, '') + '</li>';
+                }).join('');
+                return '\n<ol>' + items + '</ol>';
+            });
+            html = html.replace(/\n/g, '<br>');
+            html = html.replace(/(<\/(?:h[1-6]|ul|ol|li|pre)>)<br>/g, '$1');
+            html = html.replace(/<br>(<(?:ul|ol|li|h[1-6]|pre))/g, '$1');
+            return html;
+        }
+
         function addBotMessage(text) {
             var div = document.createElement('div');
             div.className = 'chat-message bot-message';
-            var safe = escapeHtml(text).replace(/\n/g, '<br>');
-            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content"><p>' + safe + '</p></div>';
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content">' + renderBotMarkdown(text) + '</div>';
             chatMessages.appendChild(div);
             scrollToBottom();
         }
@@ -2613,7 +2962,7 @@
 
             try {
                 conversationHistory.push({ role: 'user', content: userMessage || '[attachment]' });
-                var response = await fetch('/api/chat', {
+                var response = await fetch(apiUrl('/api/chat'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
@@ -2857,7 +3206,7 @@
                 if (challengeLoadingText) challengeLoadingText.textContent = 'Then analyzing with judge model...';
 
                 try {
-                    var response = await fetch('/api/challenge', {
+                    var response = await fetch(apiUrl('/api/challenge'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ category: currentCategory, prompt: prompt })
@@ -3055,7 +3404,7 @@
         attackgenRunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…';
         attackgenOutput.innerHTML = '<div class="attackgen-loading"><i class="fas fa-spinner fa-spin"></i> Crafting adversarial prompt…</div>';
 
-        fetch('/api/attack-generator', {
+        fetch(apiUrl('/api/attack-generator'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),

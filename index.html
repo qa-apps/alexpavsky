@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23g)'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='48' fill='white'%3E%3E_%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20260503-1306">
+    <link rel="stylesheet" href="style.css?v=20260513-md01">
 </head>
 <body>
 
@@ -74,6 +74,8 @@
                         <i class="fas fa-user-circle"></i> <span id="user-display-name"></span>
                     </button>
                     <div class="user-dropdown" id="user-dropdown">
+                        <a href="#" id="user-dashboard-link"><i class="fas fa-gauge-high"></i> Dashboard</a>
+                        <a href="#" id="admin-dashboard-link" style="display:none;"><i class="fas fa-inbox"></i> Admin Dashboard</a>
                         <a href="#" id="user-logout-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
                     </div>
                 </div>
@@ -365,6 +367,16 @@
                         <span class="tag">LlamaIndex</span>
                         <span class="tag">RAGAS</span>
                         <span class="tag">Embeddings</span>
+                    </div>
+                </div>
+                <div class="explore-card" data-animate>
+                    <div class="explore-icon"><i class="fas fa-chart-line"></i></div>
+                    <h3>AI Observability</h3>
+                    <p>Tracing, logging, and monitoring LLM apps in production. Catching drift, hallucinations, and cost spikes early.</p>
+                    <div class="explore-tags">
+                        <span class="tag">LangSmith</span>
+                        <span class="tag">Langfuse</span>
+                        <span class="tag">Helicone</span>
                     </div>
                 </div>
             </div>
@@ -830,6 +842,64 @@
         </div>
     </div>
 
+    <div class="user-dashboard-overlay" id="user-dashboard-overlay">
+        <div class="user-dashboard-modal">
+            <button class="user-dashboard-close" id="user-dashboard-close" aria-label="Close dashboard"><i class="fas fa-times"></i></button>
+            <div class="user-dashboard-header">
+                <div>
+                    <span class="dashboard-kicker"><i class="fas fa-gauge-high"></i> Dashboard</span>
+                    <h3>Client Dashboard</h3>
+                    <p id="dashboard-user-meta">Signed in</p>
+                </div>
+            </div>
+            <div class="dashboard-thread" id="dashboard-thread">
+                <div class="dashboard-empty">No messages yet.</div>
+            </div>
+            <form class="dashboard-message-form" id="dashboard-message-form">
+                <textarea id="dashboard-message-input" rows="3" placeholder="Write a message to Alex..." maxlength="2000"></textarea>
+                <div class="dashboard-message-actions">
+                    <span class="dashboard-status" id="dashboard-status"></span>
+                    <button type="submit" class="dashboard-send-btn"><i class="fas fa-paper-plane"></i> Send</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="admin-dashboard-overlay" id="admin-dashboard-overlay">
+        <div class="admin-dashboard-modal">
+            <button class="admin-dashboard-close" id="admin-dashboard-close" aria-label="Close admin dashboard"><i class="fas fa-times"></i></button>
+            <div class="admin-dashboard-header">
+                <div>
+                    <span class="dashboard-kicker"><i class="fas fa-inbox"></i> Admin Dashboard</span>
+                    <h3>Client Messages</h3>
+                    <p id="admin-email-status">Checking email setup...</p>
+                </div>
+                <button type="button" class="dashboard-refresh-btn" id="admin-dashboard-refresh"><i class="fas fa-rotate-right"></i> Refresh</button>
+            </div>
+            <div class="admin-dashboard-layout">
+                <div class="admin-conversation-list" id="admin-conversation-list">
+                    <div class="dashboard-empty">Loading conversations...</div>
+                </div>
+                <div class="admin-thread-panel">
+                    <div class="admin-thread-head">
+                        <strong id="admin-thread-title">Select a conversation</strong>
+                        <span id="admin-thread-meta">Replies are stored in the user dashboard.</span>
+                    </div>
+                    <div class="admin-thread-messages" id="admin-thread-messages">
+                        <div class="dashboard-empty">Choose a user on the left.</div>
+                    </div>
+                    <form class="admin-reply-form" id="admin-reply-form">
+                        <textarea id="admin-reply-input" rows="3" placeholder="Reply from admin dashboard..." maxlength="2000" required></textarea>
+                        <div class="dashboard-message-actions">
+                            <span class="dashboard-status" id="admin-reply-status"></span>
+                            <button type="submit" class="dashboard-send-btn"><i class="fas fa-reply"></i> Reply</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Challenge Modal -->
     <div class="json-modal" id="challenge-modal">
         <div class="modal-overlay" id="challenge-modal-overlay"></div>
@@ -949,6 +1019,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
     <input type="file" id="hallucination-file-input" accept=".txt,.md,.pdf,.docx" style="display:none">
-    <script src="script.js?v=20260503-1306"></script>
+    <script src="script.js?v=20260513-md01"></script>
 </body>
 </html>
