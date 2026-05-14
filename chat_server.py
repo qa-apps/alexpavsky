@@ -2172,16 +2172,28 @@ class Handler(SimpleHTTPRequestHandler):
                 if not content:
                     m = _re.search(r'<body[^>]*>(.*?)</body>', raw, _re.DOTALL | _re.IGNORECASE)
                     content = m.group(1) if m else raw
-                # Strip scripts, styles, navs, footers, headers
-                for strip_tag in ["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript", "svg"]:
+                # Strip non-readable tags including code blocks
+                for strip_tag in ["script", "style", "nav", "footer", "header", "aside",
+                                  "iframe", "noscript", "svg", "code", "pre", "figure",
+                                  "table", "form", "button", "select", "input"]:
                     content = _re.sub(r'<' + strip_tag + r'[^>]*>.*?</' + strip_tag + '>', '', content, flags=_re.DOTALL | _re.IGNORECASE)
-                # Strip HTML tags to get plain text, keep paragraphs
-                content = _re.sub(r'<(p|h[1-6]|li|br|div)[^>]*>', '\n\n', content, flags=_re.IGNORECASE)
-                content = _re.sub(r'<[^>]+>', '', content)
-                content = _re.sub(r'\n{3,}', '\n\n', content).strip()
-                # Limit length
-                if len(content) > 5000:
-                    content = content[:5000] + "..."
+                # Extract first 5 intro paragraphs only
+                paras = _re.findall(r'<p[^>]*>(.*?)</p>', content, flags=_re.DOTALL | _re.IGNORECASE)
+                if paras:
+                    clean = []
+                    for p in paras[:5]:
+                        t = _re.sub(r'<[^>]+>', '', p).strip()
+                        t = _re.sub(r'\s+', ' ', t)
+                        if len(t) > 30:
+                            clean.append(t)
+                    content = ' '.join(clean)
+                else:
+                    content = _re.sub(r'<(p|h[1-6]|li|br|div)[^>]*>', '\n\n', content, flags=_re.IGNORECASE)
+                    content = _re.sub(r'<[^>]+>', '', content)
+                    content = _re.sub(r'\n{3,}', '\n\n', content).strip()
+                # Limit to a short readable preview
+                if len(content) > 800:
+                    content = content[:800].rsplit(' ', 1)[0] + '…'
                 # Extract OG image
                 og_img = ""
                 og_match = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', raw, _re.IGNORECASE)

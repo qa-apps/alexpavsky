@@ -818,45 +818,22 @@
         if (titleEl) titleEl.textContent = title || 'Untitled';
         var heroEl = document.getElementById('article-modal-hero');
         if (descEl) {
-            descEl.textContent = desc || 'Loading article preview...';
-            descEl.classList.add('article-loading');
+            // Always show the RSS description — it's clean and curated by the publisher
+            descEl.textContent = desc || 'No preview available. Click "Read full article" to open the original.';
             if (heroEl) heroEl.style.backgroundImage = '';
-            // Fetch full article content via proxy
+            // Hit the proxy only to fetch the hero image (no text replacement)
             fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(url)))
-                .then(function (r) { return r.json(); })
+                .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (data) {
-                    descEl.classList.remove('article-loading');
-                    if (data.content) {
-                        var text = data.content.substring(0, 3000);
-                        if (data.content.length > 3000) text += '...';
-                        descEl.textContent = text;
-                    } else if (data.error) {
-                        descEl.textContent = desc || 'Could not load article preview.';
-                    }
-                    // Set hero background image
-                    if (data.image && heroEl) {
+                    if (data && data.image && heroEl) {
                         heroEl.style.backgroundImage = 'url(' + data.image + ')';
                     }
+                    // Only use proxy text if RSS gave nothing
+                    if (!desc && data && data.content) {
+                        descEl.textContent = data.content;
+                    }
                 })
-                .catch(function () {
-                    return fetchArticlePreviewFallback(url).then(function (data) {
-                        descEl.classList.remove('article-loading');
-                        if (data.content) {
-                            var text = data.content.substring(0, 3000);
-                            if (data.content.length > 3000) text += '...';
-                            descEl.textContent = text;
-                        } else {
-                            descEl.textContent = desc || 'Preview unavailable on this source. Use "Read full article" to open the original page.';
-                        }
-                        if (data.image && heroEl) {
-                            heroEl.style.backgroundImage = 'url(' + data.image + ')';
-                        }
-                    });
-                })
-                .catch(function () {
-                    descEl.classList.remove('article-loading');
-                    descEl.textContent = desc || 'Preview unavailable on this source. Use "Read full article" to open the original page.';
-                });
+                .catch(function () { /* image load failed — description already shown */ });
         }
         if (metaEl) {
             var parts = [];
