@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23g)'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='48' fill='white'%3E%3E_%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20260513-md01">
+    <link rel="stylesheet" href="style.css?v=20260514-forum2">
 </head>
 <body>
 
@@ -652,6 +652,11 @@
                         <p class="newsletter-msg" id="newsletter-msg"></p>
                     </form>
                 </div>
+                <div class="footer-forum-wrap">
+                    <button class="footer-forum-btn" id="forum-open-btn">
+                        <i class="fas fa-comments"></i> Forum &amp; Feedback
+                    </button>
+                </div>
                 <div class="footer-socials">
                     <a href="https://github.com/qa-apps" target="_blank" rel="noopener" class="social-icon" aria-label="GitHub"><i class="fab fa-github"></i></a>
                     <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon" aria-label="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
@@ -664,6 +669,35 @@
             </div>
         </div>
     </footer>
+
+    <!-- Forum & Feedback Modal -->
+    <div class="diff-modal" id="forum-modal">
+        <div class="modal-overlay" id="forum-modal-overlay"></div>
+        <div class="modal-content modal-wide forum-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-comments"></i> Forum &amp; Feedback</h3>
+                <button class="modal-close" id="forum-modal-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body forum-modal-body">
+                <div class="forum-compose">
+                    <div class="forum-handle-row">
+                        <span class="forum-handle-label">Your anonymous handle:</span>
+                        <span class="forum-handle-badge" id="forum-handle-display"></span>
+                    </div>
+                    <textarea class="forum-textarea" id="forum-text" placeholder="Share an idea, feedback, or question… (max 2000 chars)" maxlength="2000"></textarea>
+                    <div class="forum-compose-footer">
+                        <span class="forum-char-count" id="forum-char-count">0 / 2000</span>
+                        <button class="forum-submit-btn" id="forum-submit-btn"><i class="fas fa-paper-plane"></i> Post</button>
+                    </div>
+                    <p class="forum-status" id="forum-status"></p>
+                </div>
+                <div class="forum-divider"></div>
+                <div class="forum-posts-list" id="forum-posts-list">
+                    <div class="forum-loading">Loading posts…</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="chat-widget" class="chat-widget">
         <button id="chat-toggle" class="chat-toggle" aria-label="Open AI chat">
@@ -818,6 +852,28 @@
                 </div>
                 <div class="auth-error" id="login-error"></div>
                 <button type="submit" class="auth-submit">Login</button>
+                <p style="text-align:center;margin-top:0.75rem;"><button type="button" class="auth-link-btn" id="forgot-link">Forgot password?</button></p>
+            </form>
+            <form id="forgot-form" class="auth-form" style="display:none;">
+                <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;">Enter your email and we'll send a reset link.</p>
+                <div class="auth-field">
+                    <label for="forgot-email">Email</label>
+                    <input type="email" id="forgot-email" required placeholder="your@email.com" autocomplete="email">
+                </div>
+                <div class="auth-error" id="forgot-error"></div>
+                <div class="auth-success" id="forgot-success"></div>
+                <button type="submit" class="auth-submit">Send reset link</button>
+                <p style="text-align:center;margin-top:0.75rem;"><button type="button" class="auth-link-btn" id="forgot-back">Back to login</button></p>
+            </form>
+            <form id="reset-form" class="auth-form" style="display:none;">
+                <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;">Enter your new password.</p>
+                <div class="auth-field">
+                    <label for="reset-password">New password</label>
+                    <input type="password" id="reset-password" required placeholder="Min 6 characters" minlength="6" autocomplete="new-password">
+                </div>
+                <div class="auth-error" id="reset-error"></div>
+                <div class="auth-success" id="reset-success"></div>
+                <button type="submit" class="auth-submit">Set new password</button>
             </form>
             <form id="register-form" class="auth-form" style="display:none;">
                 <div class="auth-field">
@@ -1019,6 +1075,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
     <input type="file" id="hallucination-file-input" accept=".txt,.md,.pdf,.docx" style="display:none">
-    <script src="script.js?v=20260513-md01"></script>
+    <script src="script.js?v=20260514-forum2"></script>
 </body>
 </html>

@@ -113,6 +113,16 @@ def _init_db():
         created_at REAL NOT NULL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_newsletter_deliveries_run ON newsletter_deliveries(run_id)")
+    c.execute("""CREATE TABLE IF NOT EXISTS password_resets (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        used INTEGER NOT NULL DEFAULT 0
+    )""")
+    # Migrate: add parent_id to forum_posts if missing
+    cols = [r[1] for r in c.execute("PRAGMA table_info(forum_posts)").fetchall()]
+    if "parent_id" not in cols:
+        c.execute("ALTER TABLE forum_posts ADD COLUMN parent_id TEXT")
     conn.commit()
     conn.close()
 
@@ -897,6 +907,27 @@ def _send_user_reply_email(user_name, user_email, message_text):
     return _send_mail(user_email, "Reply from Alex Pavsky", text_body, html_body, reply_to=cfg["admin_email"])
 
 
+def _send_reset_email(user_name, user_email, reset_link):
+    first_name = (user_name or "there").split(" ")[0]
+    text_body = (
+        f"Hi {first_name},\n\n"
+        "You requested a password reset for your alexpavsky.com account.\n\n"
+        f"Reset your password here (valid for 1 hour):\n{reset_link}\n\n"
+        "If you did not request this, ignore this email — your password won't change.\n\n"
+        "Alex Pavsky"
+    )
+    html_body = (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px;'>"
+        "<div style='max-width:640px;margin:0 auto;background:#111827;border:1px solid rgba(255,255,255,0.08);border-radius:18px;padding:28px;'>"
+        f"<p style='font-size:16px;'>Hi {html_escape(first_name)},</p>"
+        "<p>You requested a password reset for your <strong>alexpavsky.com</strong> account.</p>"
+        f"<p><a href='{reset_link}' style='display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;'>Reset Password</a></p>"
+        "<p style='font-size:13px;color:#94a3b8;'>Link expires in 1 hour. If you did not request this, ignore this email.</p>"
+        "</div></body></html>"
+    )
+    return _send_mail(user_email, "Password reset — alexpavsky.com", text_body, html_body)
+
+
 def _admin_conversations():
     conn = _db()
     rows = conn.execute(
@@ -1409,7 +1440,8 @@ SYSTEM_PROMPT = (
     "You are a helpful AI assistant on Alex Pavsky's personal tech hub. "
     "You can answer questions on any topic — QA, AI testing, coding, science, history, math, languages, or casual chat. "
     "Be concise, friendly, and accurate. Format code in fenced blocks with language tags. "
-    "If files are attached, reason from provided text/metadata. "
+    "If images are attached, analyze what is visible in the image before answering. "
+    "If files are attached, analyze their provided text/content first and summarize the important details. "
     "Answer in the user's language when possible."
 )
 
@@ -1502,7 +1534,7 @@ def _pick(candidates):
 
 def _route(message, attachments):
     has_images = any(a.get("kind") == "image" for a in attachments)
-    has_files = any(a.get("kind") in ("text", "file") for a in attachments)
+    has_files = any(a.get("kind") in ("text", "file", "doc") for a in attachments)
     msg_len = len(message)
 
     if has_images:
@@ -2334,9 +2366,20 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/forum/posts":
             conn = _db()
-            rows = conn.execute("SELECT id, user_id, user_name, text, created_at FROM forum_posts ORDER BY created_at DESC LIMIT 50").fetchall()
+            top = conn.execute(
+                "SELECT id, user_name, text, created_at FROM forum_posts WHERE parent_id IS NULL ORDER BY created_at DESC LIMIT 50"
+            ).fetchall()
+            posts = []
+            for r in top:
+                replies = conn.execute(
+                    "SELECT id, user_name, text, created_at FROM forum_posts WHERE parent_id = ? ORDER BY created_at ASC LIMIT 50",
+                    (r["id"],)
+                ).fetchall()
+                posts.append({
+                    "id": r["id"], "user_name": r["user_name"], "text": r["text"], "created_at": r["created_at"],
+                    "replies": [{"id": rr["id"], "user_name": rr["user_name"], "text": rr["text"], "created_at": rr["created_at"]} for rr in replies]
+                })
             conn.close()
-            posts = [{"id": r["id"], "user_name": r["user_name"], "text": r["text"], "created_at": r["created_at"]} for r in rows]
             self._json(200, {"posts": posts})
             return
         super().do_GET()
@@ -2382,6 +2425,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self._handle_admin_reply()
         if self.path == "/api/forum/posts":
             return self._handle_forum_post()
+        if self.path == "/api/auth/forgot":
+            return self._handle_forgot_password()
+        if self.path == "/api/auth/reset":
+            return self._handle_reset_password()
         if self.path == "/api/challenge":
             return self._handle_challenge()
         if self.path == "/api/attack-generator":
@@ -2448,6 +2495,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if not reply or not reply.strip():
             chain = _get_fallback_chain(model, tier)
+            if reason == "vision":
+                chain = [fallback for fallback in chain if fallback.get("id") in VISION_MODEL_IDS]
             for fallback in chain[:6]:
                 log.info("fallback: %s -> %s (%s)", model["label"], fallback["label"], fallback["provider"])
                 fallback_content, _ = _build_content(message, attachments, fallback["id"])
@@ -2578,6 +2627,65 @@ class Handler(SimpleHTTPRequestHandler):
             conn.close()
         self._json(200, {"ok": True})
 
+    def _handle_forgot_password(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        email = (body.get("email") or "").strip().lower()
+        if not email:
+            self._json(400, {"error": "Email required."})
+            return
+        conn = _db()
+        row = conn.execute("SELECT id, name FROM users WHERE email = ?", (email,)).fetchone()
+        if not row:
+            conn.close()
+            # Don't reveal whether email exists
+            self._json(200, {"ok": True, "message": "If that email is registered, a reset link has been sent."})
+            return
+        token = uuid.uuid4().hex
+        conn.execute("INSERT INTO password_resets (token, user_id, created_at) VALUES (?, ?, ?)", (token, row["id"], time.time()))
+        conn.commit()
+        conn.close()
+        reset_link = f"https://alexpavsky.com/?reset={token}"
+        sent = False
+        if _mail_transport_ready():
+            try:
+                _send_async(_send_reset_email, row["name"], email, reset_link)
+                sent = True
+            except Exception:
+                pass
+        log.info("password_reset token=%s email=%s sent=%s", token[:8], email[:3] + "***", sent)
+        self._json(200, {"ok": True, "message": "If that email is registered, a reset link has been sent.", "_dev_link": reset_link if not sent else None})
+
+    def _handle_reset_password(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        token = (body.get("token") or "").strip()
+        password = body.get("password") or ""
+        if not token or len(password) < 6:
+            self._json(400, {"error": "Token and new password (min 6 chars) required."})
+            return
+        conn = _db()
+        row = conn.execute(
+            "SELECT token, user_id, created_at, used FROM password_resets WHERE token = ?", (token,)
+        ).fetchone()
+        if not row or row["used"] or (time.time() - row["created_at"]) > 3600:
+            conn.close()
+            self._json(400, {"error": "Reset link is invalid or has expired (valid for 1 hour)."})
+            return
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash_pw(password), row["user_id"]))
+        conn.execute("UPDATE password_resets SET used = 1 WHERE token = ?", (token,))
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
+        conn.commit()
+        conn.close()
+        log.info("password_reset completed user=%s", row["user_id"][:8])
+        self._json(200, {"ok": True})
+
     def _handle_user_message(self):
         user = _get_user_by_token(self._get_token())
         if not user:
@@ -2654,11 +2762,53 @@ class Handler(SimpleHTTPRequestHandler):
             "email_ready": _mail_transport_ready(),
         })
 
+    _forum_rate = {}  # ip_hash -> last_post_time
+
+    def _moderate_forum_content(self, text):
+        """Returns (safe: bool, reason: str). Uses fastest available Groq model."""
+        api_key = os.environ.get("GROQ_API_KEY", "")
+        if not api_key:
+            return True, ""
+        system = (
+            "You are a strict content moderator. Analyse the user message and respond ONLY with valid JSON: "
+            '{"safe": true|false, "reason": "short reason if not safe"}. '
+            "Flag as NOT SAFE (safe=false) if the message contains any of: "
+            "violence or murder threats, graphic gore, calls to harm people or animals, "
+            "hate speech or slurs targeting race/ethnicity/religion/gender/sexuality, "
+            "sexism or misogyny, sexual harassment, rape glorification, "
+            "child sexual abuse material (CSAM), terrorism or extremist recruitment, "
+            "self-harm or suicide instructions, doxxing of private individuals. "
+            "Educational discussion, news references, and mild profanity are SAFE. "
+            "When in doubt, return safe=true. Return ONLY the JSON object, no other text."
+        )
+        payload = {
+            "model": "llama-3.1-8b-instant",
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": text[:2000]},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 60,
+        }
+        try:
+            req = Request(
+                GROQ_API_URL,
+                data=json.dumps(payload).encode(),
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=8) as resp:
+                raw = json.loads(resp.read().decode())
+            reply = raw.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            # strip markdown fences if any
+            reply = re.sub(r"^```[a-z]*\n?", "", reply).rstrip("`").strip()
+            parsed = json.loads(reply)
+            return bool(parsed.get("safe", True)), str(parsed.get("reason", ""))
+        except Exception as e:
+            log.warning("moderation error: %s", e)
+            return True, ""  # fail open — don't block posts on moderation errors
+
     def _handle_forum_post(self):
-        user = _get_user_by_token(self._get_token())
-        if not user:
-            self._json(401, {"error": "Login required to post."})
-            return
         try:
             body = self._read_body()
         except Exception:
@@ -2668,16 +2818,38 @@ class Handler(SimpleHTTPRequestHandler):
         if not text or len(text) > 2000:
             self._json(400, {"error": "Message required (max 2000 chars)."})
             return
-        pid = uuid.uuid4().hex
+        handle = (body.get("handle") or "").strip()
+        if not handle or not re.match(r'^[A-Za-z0-9]{4,8}$', handle):
+            self._json(400, {"error": "Invalid handle."})
+            return
+        parent_id = (body.get("parent_id") or "").strip() or None
+        ip_hash = _hash_ip(self._client_ip())
         now = time.time()
+        last = Handler._forum_rate.get(ip_hash, 0)
+        if now - last < 20:
+            self._json(429, {"error": "Please wait before posting again."})
+            return
+        safe, reason = self._moderate_forum_content(text)
+        if not safe:
+            log.warning("forum moderation blocked post from %s: %s", ip_hash[:8], reason)
+            self._json(400, {"error": "Your message was flagged by our content filter and could not be posted."})
+            return
+        Handler._forum_rate[ip_hash] = now
+        pid = uuid.uuid4().hex
         conn = _db()
+        if parent_id:
+            exists = conn.execute("SELECT 1 FROM forum_posts WHERE id = ? AND parent_id IS NULL", (parent_id,)).fetchone()
+            if not exists:
+                conn.close()
+                self._json(400, {"error": "Parent post not found."})
+                return
         conn.execute(
-            "INSERT INTO forum_posts (id, user_id, user_name, text, created_at) VALUES (?, ?, ?, ?, ?)",
-            (pid, user["id"], user["name"], text, now)
+            "INSERT INTO forum_posts (id, user_id, user_name, text, created_at, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (pid, handle, handle, text, now, parent_id)
         )
         conn.commit()
         conn.close()
-        self._json(200, {"post": {"id": pid, "user_name": user["name"], "text": text, "created_at": now}})
+        self._json(200, {"post": {"id": pid, "user_name": handle, "text": text, "created_at": now, "parent_id": parent_id}})
 
 
     # ─── Challenge ───

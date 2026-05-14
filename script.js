@@ -1622,6 +1622,193 @@
         });
     }
 
+    // ─── Forum & Feedback ───
+    (function () {
+        var HANDLE_KEY = 'forum_handle';
+        var CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+        function genHandle() {
+            var h = '';
+            for (var i = 0; i < 6; i++) h += CHARS[Math.floor(Math.random() * CHARS.length)];
+            return h;
+        }
+
+        function getHandle() {
+            var h = localStorage.getItem(HANDLE_KEY);
+            if (!h || !/^[a-z0-9]{4,8}$/.test(h)) {
+                h = genHandle();
+                localStorage.setItem(HANDLE_KEY, h);
+            }
+            return h;
+        }
+
+        function timeAgo(ts) {
+            var sec = Math.floor((Date.now() / 1000) - ts);
+            if (sec < 60) return sec + 's ago';
+            if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+            if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+            return Math.floor(sec / 86400) + 'd ago';
+        }
+
+        function renderReply(r) {
+            return '<div class="forum-reply">' +
+                '<div class="forum-post-header">' +
+                '<span class="forum-post-handle">' + escapeHtml(r.user_name) + '</span>' +
+                '<span class="forum-post-time">' + timeAgo(r.created_at) + '</span>' +
+                '</div>' +
+                '<div class="forum-post-text">' + escapeHtml(r.text) + '</div>' +
+                '</div>';
+        }
+
+        function renderPosts(posts) {
+            var list = document.getElementById('forum-posts-list');
+            if (!list) return;
+            if (!posts || !posts.length) {
+                list.innerHTML = '<div class="forum-empty">No posts yet — be the first!</div>';
+                return;
+            }
+            list.innerHTML = posts.map(function (p) {
+                var repliesHtml = (p.replies && p.replies.length)
+                    ? '<div class="forum-replies">' + p.replies.map(renderReply).join('') + '</div>'
+                    : '';
+                return '<div class="forum-post" data-id="' + escapeHtml(p.id) + '">' +
+                    '<div class="forum-post-header">' +
+                    '<span class="forum-post-handle">' + escapeHtml(p.user_name) + '</span>' +
+                    '<span class="forum-post-time">' + timeAgo(p.created_at) + '</span>' +
+                    '</div>' +
+                    '<div class="forum-post-text">' + escapeHtml(p.text) + '</div>' +
+                    repliesHtml +
+                    '<div class="forum-post-actions">' +
+                    '<button class="forum-reply-btn" data-parent="' + escapeHtml(p.id) + '"><i class="fas fa-reply"></i> Reply</button>' +
+                    '</div>' +
+                    '<div class="forum-inline-reply" data-reply-box="' + escapeHtml(p.id) + '" style="display:none;">' +
+                    '<textarea placeholder="Write a reply…" maxlength="2000"></textarea>' +
+                    '<button class="forum-inline-reply-send">Send</button>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+
+            // Wire up reply buttons
+            list.querySelectorAll('.forum-reply-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var pid = btn.dataset.parent;
+                    var box = list.querySelector('[data-reply-box="' + pid + '"]');
+                    if (!box) return;
+                    var isOpen = box.style.display !== 'none';
+                    box.style.display = isOpen ? 'none' : 'flex';
+                    if (!isOpen) box.querySelector('textarea').focus();
+                });
+            });
+
+            list.querySelectorAll('.forum-inline-reply-send').forEach(function (sendBtn) {
+                sendBtn.addEventListener('click', async function () {
+                    var box = sendBtn.closest('.forum-inline-reply');
+                    var ta = box.querySelector('textarea');
+                    var text = ta.value.trim();
+                    if (!text) return;
+                    var pid = box.dataset.replyBox;
+                    sendBtn.disabled = true;
+                    try {
+                        var res = await fetch(apiUrl('/api/forum/posts'), {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ text: text, handle: getHandle(), parent_id: pid })
+                        });
+                        var data = await res.json();
+                        if (res.ok) {
+                            ta.value = '';
+                            box.style.display = 'none';
+                            loadPosts();
+                        } else {
+                            alert(data.error || 'Could not post reply.');
+                        }
+                    } catch (e) {
+                        alert('Network error. Try again.');
+                    }
+                    sendBtn.disabled = false;
+                });
+            });
+        }
+
+        async function loadPosts() {
+            var list = document.getElementById('forum-posts-list');
+            if (list) list.innerHTML = '<div class="forum-loading">Loading posts…</div>';
+            try {
+                var res = await fetch(apiUrl('/api/forum/posts'));
+                var data = await res.json();
+                renderPosts(data.posts || []);
+            } catch (e) {
+                if (list) list.innerHTML = '<div class="forum-empty">Could not load posts.</div>';
+            }
+        }
+
+        var forumModal = document.getElementById('forum-modal');
+        var forumOpenBtn = document.getElementById('forum-open-btn');
+        var forumCloseBtn = document.getElementById('forum-modal-close');
+        var forumOverlay = document.getElementById('forum-modal-overlay');
+        var forumText = document.getElementById('forum-text');
+        var forumSubmit = document.getElementById('forum-submit-btn');
+        var forumStatus = document.getElementById('forum-status');
+        var forumCharCount = document.getElementById('forum-char-count');
+        var forumHandleDisplay = document.getElementById('forum-handle-display');
+
+        function openForum() {
+            if (!forumModal) return;
+            var h = getHandle();
+            if (forumHandleDisplay) forumHandleDisplay.textContent = h;
+            forumModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            loadPosts();
+        }
+
+        function closeForum() {
+            if (!forumModal) return;
+            forumModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        if (forumOpenBtn) forumOpenBtn.addEventListener('click', openForum);
+        if (forumCloseBtn) forumCloseBtn.addEventListener('click', closeForum);
+        if (forumOverlay) forumOverlay.addEventListener('click', closeForum);
+
+        if (forumText) {
+            forumText.addEventListener('input', function () {
+                if (forumCharCount) forumCharCount.textContent = forumText.value.length + ' / 2000';
+            });
+        }
+
+        if (forumSubmit) {
+            forumSubmit.addEventListener('click', async function () {
+                var text = forumText ? forumText.value.trim() : '';
+                if (!text) return;
+                var handle = getHandle();
+                forumSubmit.disabled = true;
+                if (forumStatus) { forumStatus.textContent = ''; forumStatus.className = 'forum-status'; }
+                try {
+                    var res = await fetch(apiUrl('/api/forum/posts'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ text: text, handle: handle })
+                    });
+                    var data = await res.json();
+                    if (res.ok) {
+                        forumText.value = '';
+                        if (forumCharCount) forumCharCount.textContent = '0 / 2000';
+                        if (forumStatus) { forumStatus.textContent = 'Posted!'; forumStatus.className = 'forum-status success'; }
+                        loadPosts();
+                    } else {
+                        if (forumStatus) { forumStatus.textContent = data.error || 'Could not post.'; forumStatus.className = 'forum-status error'; }
+                    }
+                } catch (e) {
+                    if (forumStatus) { forumStatus.textContent = 'Network error. Try again.'; forumStatus.className = 'forum-status error'; }
+                }
+                forumSubmit.disabled = false;
+            });
+        }
+    })();
+
     // ─── Auth ───
     var authBtn = document.getElementById('auth-btn');
     var userMenu = document.getElementById('user-menu');
@@ -1633,6 +1820,8 @@
     var authModalClose = document.getElementById('auth-modal-close');
     var loginForm = document.getElementById('login-form');
     var registerForm = document.getElementById('register-form');
+    var forgotForm = document.getElementById('forgot-form');
+    var resetForm = document.getElementById('reset-form');
     var loginError = document.getElementById('login-error');
     var registerError = document.getElementById('register-error');
 
@@ -1665,15 +1854,22 @@
         if (userDropdown) userDropdown.classList.remove('open');
     }
 
+    function showAuthForm(which) {
+        [loginForm, registerForm, forgotForm, resetForm].forEach(function(f) { if (f) f.style.display = 'none'; });
+        var tabs = document.querySelector('.auth-tabs');
+        if (tabs) tabs.style.display = (which === 'login' || which === 'register') ? '' : 'none';
+        var map = { login: loginForm, register: registerForm, forgot: forgotForm, reset: resetForm };
+        if (map[which]) map[which].style.display = '';
+        document.querySelectorAll('.auth-tab').forEach(function(t) {
+            t.classList.toggle('active', t.dataset.tab === which);
+        });
+    }
+
     function openAuthModal(tab) {
         authOverlay.classList.add('open');
         if (loginError) loginError.textContent = '';
         if (registerError) registerError.textContent = '';
-        document.querySelectorAll('.auth-tab').forEach(function(t) {
-            t.classList.toggle('active', t.dataset.tab === tab);
-        });
-        if (loginForm) loginForm.style.display = tab === 'login' ? '' : 'none';
-        if (registerForm) registerForm.style.display = tab === 'register' ? '' : 'none';
+        showAuthForm(tab);
     }
 
     function closeAuthModal() { if (authOverlay) authOverlay.classList.remove('open'); }
@@ -1748,6 +1944,84 @@
             .catch(function() { btn.disabled = false; registerError.textContent = 'Network error.'; });
         });
     }
+
+    // Forgot password
+    var forgotLink = document.getElementById('forgot-link');
+    var forgotBack = document.getElementById('forgot-back');
+    if (forgotLink) forgotLink.addEventListener('click', function() { showAuthForm('forgot'); });
+    if (forgotBack) forgotBack.addEventListener('click', function() { showAuthForm('login'); });
+
+    if (forgotForm) {
+        forgotForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var errEl = document.getElementById('forgot-error');
+            var okEl = document.getElementById('forgot-success');
+            var btn = forgotForm.querySelector('.auth-submit');
+            if (errEl) errEl.textContent = '';
+            if (okEl) okEl.textContent = '';
+            var email = document.getElementById('forgot-email').value.trim();
+            btn.disabled = true;
+            try {
+                var res = await fetch(apiUrl('/api/auth/forgot'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email })
+                });
+                var data = await res.json();
+                if (res.ok) {
+                    if (okEl) okEl.textContent = data.message || 'Reset link sent!';
+                    // Dev helper: show link if SMTP not configured
+                    if (data._dev_link && errEl) errEl.textContent = '[DEV] ' + data._dev_link;
+                } else {
+                    if (errEl) errEl.textContent = data.error || 'Request failed.';
+                }
+            } catch(e) {
+                if (errEl) errEl.textContent = 'Network error.';
+            }
+            btn.disabled = false;
+        });
+    }
+
+    if (resetForm) {
+        resetForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var errEl = document.getElementById('reset-error');
+            var okEl = document.getElementById('reset-success');
+            var btn = resetForm.querySelector('.auth-submit');
+            if (errEl) errEl.textContent = '';
+            if (okEl) okEl.textContent = '';
+            var token = new URLSearchParams(window.location.search).get('reset') || '';
+            var password = document.getElementById('reset-password').value;
+            btn.disabled = true;
+            try {
+                var res = await fetch(apiUrl('/api/auth/reset'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token, password: password })
+                });
+                var data = await res.json();
+                if (res.ok) {
+                    if (okEl) okEl.textContent = 'Password updated! You can now log in.';
+                    setTimeout(function() {
+                        history.replaceState(null, '', window.location.pathname);
+                        showAuthForm('login');
+                    }, 2000);
+                } else {
+                    if (errEl) errEl.textContent = data.error || 'Reset failed.';
+                }
+            } catch(e) {
+                if (errEl) errEl.textContent = 'Network error.';
+            }
+            btn.disabled = false;
+        });
+    }
+
+    // Auto-open reset form if ?reset=token in URL
+    (function() {
+        var resetToken = new URLSearchParams(window.location.search).get('reset');
+        if (resetToken && authOverlay) {
+            authOverlay.classList.add('open');
+            showAuthForm('reset');
+        }
+    })();
 
     if (userMenuToggle) {
         userMenuToggle.addEventListener('click', function() { userDropdown.classList.toggle('open'); });
@@ -2711,12 +2985,19 @@
             pendingFiles.forEach(function (file, idx) {
                 var chip = document.createElement('div');
                 chip.className = 'chat-attachment-chip';
-                var iconClass = file.type.startsWith('image/') ? 'fa-image' : 'fa-file';
-                chip.innerHTML = '<i class="fas ' + iconClass + '"></i><span class="chip-name">' + escapeHtml(file.name) + '</span><button type="button" class="chat-attachment-remove" data-index="' + idx + '">&times;</button>';
+                chip.innerHTML = renderAttachmentCardMarkup({
+                    name: file.name,
+                    type: file.type || 'application/octet-stream',
+                    size: file.size || 0,
+                    kind: file.type && file.type.startsWith('image/') ? 'image' : (isTextFile(file) ? 'text' : (isDocFile(file) ? 'doc' : 'file')),
+                    preview_url: ensurePendingImageUrl(file)
+                }, { index: idx });
                 attachmentsContainer.appendChild(chip);
             });
             attachmentsContainer.querySelectorAll('.chat-attachment-remove').forEach(function (btn) {
                 btn.addEventListener('click', function () {
+                    var file = pendingFiles[Number(this.dataset.index)];
+                    cleanupPendingFile(file);
                     pendingFiles.splice(Number(this.dataset.index), 1);
                     renderPendingFiles();
                 });
@@ -2836,17 +3117,74 @@
             });
         }
 
+        function buildSerializedTextAttachment(base, text) {
+            var normalized = typeof text === 'string' ? text.replace(/\u0000/g, '').trim() : '';
+            var truncated = normalized.length > maxTextChars;
+            return Object.assign(base, {
+                kind: 'text',
+                text: truncated ? normalized.slice(0, maxTextChars) : normalized,
+                truncated: truncated
+            });
+        }
+
+        async function extractPdfText(file) {
+            var pdfjsLib = window.pdfjsLib;
+            if (!pdfjsLib) return '';
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            var arrayBuffer = await file.arrayBuffer();
+            var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            var maxPages = Math.min(pdf.numPages, 20);
+            var pages = [];
+            for (var i = 1; i <= maxPages; i++) {
+                var page = await pdf.getPage(i);
+                var textContent = await page.getTextContent();
+                var pageText = textContent.items.map(function (item) { return item.str || ''; }).join(' ').trim();
+                if (pageText) pages.push(pageText);
+                if (pages.join('\n\n').length > maxTextChars * 2) break;
+            }
+            return pages.join('\n\n').trim();
+        }
+
+        async function extractDocxText(file) {
+            if (!window.mammoth) return '';
+            var arrayBuffer = await file.arrayBuffer();
+            var result = await window.mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+            return String((result && result.value) || '').trim();
+        }
+
         function serializeAttachments(files) {
             var promises = files.map(function (file) {
                 var base = { name: file.name, type: file.type || 'application/octet-stream', size: file.size };
+                var lowerName = (file.name || '').toLowerCase();
                 if (file.type.startsWith('image/')) {
                     return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'image', data_url: url }); });
                 }
                 if (isTextFile(file)) {
                     return file.text().then(function (text) {
-                        var truncated = text.length > maxTextChars;
-                        return Object.assign(base, { kind: 'text', text: truncated ? text.slice(0, maxTextChars) : text, truncated: truncated });
+                        return buildSerializedTextAttachment(base, text);
                     });
+                }
+                if (lowerName.endsWith('.pdf')) {
+                    return extractPdfText(file)
+                        .then(function (text) {
+                            return text
+                                ? buildSerializedTextAttachment(base, text)
+                                : readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                        })
+                        .catch(function () {
+                            return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                        });
+                }
+                if (lowerName.endsWith('.docx')) {
+                    return extractDocxText(file)
+                        .then(function (text) {
+                            return text
+                                ? buildSerializedTextAttachment(base, text)
+                                : readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                        })
+                        .catch(function () {
+                            return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                        });
                 }
                 if (isDocFile(file)) {
                     return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
@@ -2856,14 +3194,112 @@
             return Promise.all(promises);
         }
 
+        function formatFileSize(bytes) {
+            if (!bytes || bytes < 1024) return (bytes || 0) + ' B';
+            var units = ['KB', 'MB', 'GB'];
+            var size = bytes / 1024;
+            var unitIndex = 0;
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+            }
+            return size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1) + ' ' + units[unitIndex];
+        }
+
+        function cleanupPendingFile(file) {
+            if (file && file.__chatPreviewUrl) {
+                URL.revokeObjectURL(file.__chatPreviewUrl);
+                delete file.__chatPreviewUrl;
+            }
+        }
+
+        function clearPendingFiles() {
+            pendingFiles.forEach(cleanupPendingFile);
+            pendingFiles = [];
+            renderPendingFiles();
+        }
+
+        function ensurePendingImageUrl(file) {
+            if (!file || !file.type || !file.type.startsWith('image/')) return '';
+            if (!file.__chatPreviewUrl) file.__chatPreviewUrl = URL.createObjectURL(file);
+            return file.__chatPreviewUrl;
+        }
+
+        function attachmentIconClass(attachment) {
+            var type = ((attachment && attachment.type) || '').toLowerCase();
+            var name = ((attachment && attachment.name) || '').toLowerCase();
+            var kind = (attachment && attachment.kind) || '';
+            if (kind === 'image') return 'fa-image';
+            if (type.indexOf('pdf') !== -1 || /\.pdf$/.test(name)) return 'fa-file-pdf';
+            if (type.indexOf('word') !== -1 || /\.docx?$/.test(name)) return 'fa-file-word';
+            if (type.indexOf('json') !== -1 || type.indexOf('csv') !== -1 || type.indexOf('text') !== -1 || /\.(txt|md|csv|json|xml|yml|yaml)$/.test(name)) return 'fa-file-lines';
+            return 'fa-file';
+        }
+
+        function attachmentKindLabel(attachment) {
+            var kind = (attachment && attachment.kind) || 'file';
+            if (kind === 'image') return 'Image';
+            if (kind === 'text') return 'Text file';
+            if (kind === 'doc') return 'Document';
+            return 'File';
+        }
+
+        function attachmentSnippet(attachment) {
+            var text = attachment && attachment.text ? String(attachment.text) : '';
+            text = text.replace(/\s+/g, ' ').trim();
+            if (!text) return '';
+            return text.length > 140 ? text.slice(0, 140) + '…' : text;
+        }
+
+        function renderAttachmentCardMarkup(attachment, options) {
+            var previewUrl = (attachment && (attachment.data_url || attachment.preview_url)) || '';
+            var isImage = attachment && attachment.kind === 'image' && previewUrl;
+            var metaParts = [attachmentKindLabel(attachment)];
+            if (attachment && attachment.size) metaParts.push(formatFileSize(attachment.size));
+            var preview = attachmentSnippet(attachment);
+            var removeBtn = options && typeof options.index === 'number'
+                ? '<button type="button" class="chat-attachment-remove" data-index="' + options.index + '">&times;</button>'
+                : '';
+            var media = isImage
+                ? '<div class="chat-attachment-thumb"><img src="' + escapeHtml(previewUrl) + '" alt="' + escapeHtml((attachment && attachment.name) || 'attachment') + '"></div>'
+                : '<div class="chat-attachment-file-icon"><i class="fas ' + attachmentIconClass(attachment) + '"></i></div>';
+            return '<div class="chat-attachment-card">' +
+                media +
+                '<div class="chat-attachment-meta">' +
+                    '<div class="chat-attachment-title">' + escapeHtml((attachment && attachment.name) || 'Attachment') + '</div>' +
+                    '<div class="chat-attachment-subtitle">' + escapeHtml(metaParts.join(' · ')) + '</div>' +
+                    (preview ? '<div class="chat-attachment-preview-text">' + escapeHtml(preview) + '</div>' : '') +
+                '</div>' +
+                removeBtn +
+            '</div>';
+        }
+
+        function renderMessageAttachments(attachments) {
+            var items = (attachments || []).map(function (attachment) {
+                return renderAttachmentCardMarkup(attachment);
+            }).join('');
+            return items ? '<div class="message-attachments">' + items + '</div>' : '';
+        }
+
+        function buildAttachmentAnalysisPrompt(message, attachments) {
+            var text = (message || '').trim();
+            if (text) return text;
+            var items = attachments || [];
+            var hasImages = items.some(function (attachment) { return attachment.kind === 'image'; });
+            var hasTextual = items.some(function (attachment) { return attachment.kind === 'text' || attachment.kind === 'doc'; });
+            if (hasImages && hasTextual) return 'Please analyze the attached images and files, describe what is visible, and summarize the most important details.';
+            if (hasImages) return 'Please analyze the attached image and describe what you see in detail.';
+            if (hasTextual) return 'Please analyze the attached file and summarize the key points.';
+            return 'Please analyze the attached file and tell me the important details.';
+        }
+
         // ── Messages ──
         function addUserMessage(text, attachments) {
             var safeText = text ? '<p>' + escapeHtml(text) + '</p>' : '';
-            var names = (attachments || []).map(function (a) { return a && a.name; }).filter(Boolean);
-            var filesLine = names.length ? '<p>📎 ' + escapeHtml(names.join(', ')) + '</p>' : '';
+            var filesHtml = renderMessageAttachments(attachments);
             var div = document.createElement('div');
             div.className = 'chat-message user-message';
-            div.innerHTML = '<div class="message-avatar"><i class="fas fa-user"></i></div><div class="message-content">' + (safeText || '<p>📎 Sent attachment(s)</p>') + filesLine + '</div>';
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-user"></i></div><div class="message-content">' + (safeText || '') + (filesHtml || '') + ((!safeText && !filesHtml) ? '<p>📎 Sent attachment(s)</p>' : '') + '</div>';
             chatMessages.appendChild(div);
             scrollToBottom();
         }
@@ -2931,22 +3367,19 @@
             if (!message && !pendingFiles.length) return;
 
             var queuedFiles = pendingFiles.slice();
-            var attachmentSummary = queuedFiles.map(function (f) {
-                return { name: f.name, type: f.type, size: f.size, kind: f.type.startsWith('image/') ? 'image' : 'file' };
-            });
 
             isSending = true;
             if (recognition && isListening) recognition.stop();
 
             try {
                 var attachments = await serializeAttachments(queuedFiles);
-                addUserMessage(message, attachmentSummary);
+                var requestMessage = buildAttachmentAnalysisPrompt(message, attachments);
+                addUserMessage(message, attachments);
                 chatInput.value = '';
                 if (chatClearInput) chatClearInput.classList.remove('visible');
-                pendingFiles = [];
-                renderPendingFiles();
+                clearPendingFiles();
                 showTypingIndicator();
-                await handleBotResponse(message, attachments);
+                await handleBotResponse(requestMessage, attachments);
             } catch (err) {
                 hideTypingIndicator();
                 addBotMessage('Could not process the request. Please try again.');
@@ -2971,9 +3404,16 @@
                 });
 
                 if (!response.ok) {
-                    var errText = '';
-                    try { var errData = await response.json(); errText = errData.message || errData.error || ''; } catch (_) {}
-                    throw new Error(errText || 'HTTP ' + response.status);
+                    var errData = {};
+                    try { errData = await response.json(); } catch (_) {}
+                    var errReply = errData && typeof errData.reply === 'string' ? errData.reply.trim() : '';
+                    if (errReply) {
+                        hideTypingIndicator();
+                        conversationHistory.push({ role: 'assistant', content: errReply });
+                        addBotMessage(errReply);
+                        return;
+                    }
+                    throw new Error((errData && (errData.message || errData.error)) || ('HTTP ' + response.status));
                 }
 
                 var data = await response.json();
@@ -2989,6 +3429,8 @@
                 hideTypingIndicator();
                 if (error && error.name === 'AbortError') {
                     addBotMessage('Response stopped.');
+                } else if (attachments && attachments.length) {
+                    addBotMessage('I received the attachment, but the analysis service is temporarily unavailable right now. Please try again in a moment.');
                 } else {
                     addBotMessage(getFallbackReply(userMessage));
                 }
