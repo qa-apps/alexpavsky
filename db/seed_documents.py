@@ -14,29 +14,32 @@ import urllib.request
 import urllib.parse
 import json
 
-RAG_API = "http://localhost:8001"
+RAG_API = os.environ.get("RAG_API_URL", "http://localhost:8001").rstrip("/")
 
+DOC_DIR = "/Users/alexp/llm-wiki/raw"
 DOCUMENTS = [
-    "/Users/alexp/Desktop/e/01_Senior_QA_Automation_AI_Assisted_Testing_Handbook.docx",
-    "/Users/alexp/Desktop/e/02_Playwright_TypeScript_Framework_Architecture.docx",
-    "/Users/alexp/Desktop/e/03_LLM_Evaluation_RAG_Testing_QA_Guide.docx",
-    "/Users/alexp/Desktop/e/04_MCP_Servers_Agentic_Testing_SDET_Guide.docx",
-    "/Users/alexp/Desktop/e/05_Cloud_Kubernetes_Observability_Security_QA_Guide.docx",
-    "/Users/alexp/Desktop/e/Advanced LLM Red Teaming and Adversarial Testing Strategies for QA Engineers.docx",
-    "/Users/alexp/Desktop/e/Architecting LLM-as-a-Judge Evaluation Frameworks for Generative AI Features.docx",
-    "/Users/alexp/Desktop/e/Data Integrity and Distributed Systems Automation_ GraphQL, Kafka, and Database Validation.docx",
-    "/Users/alexp/Desktop/e/Enterprise Playwright Automation Architecture for Scalable SaaS Platforms.docx",
-    "/Users/alexp/Desktop/e/Implementing Model Context Protocol (MCP) in Agentic Test Orchestration.docx",
+    f"{DOC_DIR}/01_Senior_QA_Automation_AI_Assisted_Testing_Handbook.docx",
+    f"{DOC_DIR}/02_Playwright_TypeScript_Framework_Architecture.docx",
+    f"{DOC_DIR}/03_LLM_Evaluation_RAG_Testing_QA_Guide.docx",
+    f"{DOC_DIR}/04_MCP_Servers_Agentic_Testing_SDET_Guide.docx",
+    f"{DOC_DIR}/05_Cloud_Kubernetes_Observability_Security_QA_Guide.docx",
+    f"{DOC_DIR}/Advanced LLM Red Teaming and Adversarial Testing Strategies for QA Engineers.docx",
+    f"{DOC_DIR}/Architecting LLM-as-a-Judge Evaluation Frameworks for Generative AI Features.docx",
+    f"{DOC_DIR}/Data Integrity and Distributed Systems Automation_ GraphQL, Kafka, and Database Validation.docx",
+    f"{DOC_DIR}/Enterprise Playwright Automation Architecture for Scalable SaaS Platforms.docx",
+    f"{DOC_DIR}/Implementing Model Context Protocol (MCP) in Agentic Test Orchestration.docx",
 ]
 
 def check_health():
+    # nginx routes /api/rag/* to RAG (8001) but /api/health to chat_server (8000),
+    # so use /api/rag/metrics as the readiness probe — it round-trips through the
+    # same path the uploads will use.
     try:
-        with urllib.request.urlopen(f"{RAG_API}/api/health", timeout=5) as r:
+        with urllib.request.urlopen(f"{RAG_API}/api/rag/metrics", timeout=5) as r:
             data = json.loads(r.read())
-            pg = data.get("postgres", "?")
-            qd = data.get("qdrant", "?")
-            print(f"  Health: postgres={pg}, qdrant={qd}")
-            return pg == "connected" and qd == "connected"
+            total = data.get("aggregate", {}).get("total_queries", "?")
+            print(f"  RAG reachable, total_queries={total}")
+            return True
     except Exception as e:
         print(f"  ERROR: RAG API not reachable — {e}")
         return False
