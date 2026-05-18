@@ -1646,6 +1646,149 @@ def _feed_cached_articles():
     return articles
 
 
+# ── Article modal helpers (used by /api/article-proxy|page|embed) ─────────
+_ARTICLE_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
+
+def _article_fetch(url, timeout=10, max_bytes=2_000_000):
+    """Fetch an article URL with a real UA, return (html, final_url).
+
+    Caps response at max_bytes so a single bad source can't blow out the
+    chat_server worker. Surface HTTP errors as Exception so the caller
+    returns a friendly fallback page instead of leaking a stacktrace.
+    """
+    req = Request(url, headers={
+        "User-Agent": _ARTICLE_UA,
+        "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    with urlopen(req, timeout=timeout) as resp:
+        raw = resp.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            raw = raw[:max_bytes]
+        ct = resp.headers.get("Content-Type", "")
+        # Pick encoding: prefer header charset, fall back to utf-8.
+        encoding = "utf-8"
+        m = re.search(r"charset=([\w-]+)", ct, re.IGNORECASE)
+        if m:
+            encoding = m.group(1)
+        try:
+            text = raw.decode(encoding, errors="replace")
+        except LookupError:
+            text = raw.decode("utf-8", errors="replace")
+        return text, resp.geturl() or url
+
+
+def _article_extract_og_image(html_text, base_url):
+    """Pull the OG/Twitter image meta tag, fall back to first large <img>."""
+    for pattern in (
+        r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+    ):
+        m = re.search(pattern, html_text, re.IGNORECASE)
+        if m:
+            return _article_resolve_url(m.group(1).strip(), base_url)
+    m = re.search(r'<img[^>]+src=["\']([^"\']+\.(?:jpg|jpeg|png|webp))["\']', html_text, re.IGNORECASE)
+    if m:
+        return _article_resolve_url(m.group(1).strip(), base_url)
+    return None
+
+
+def _article_extract_title(html_text):
+    m = re.search(
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+        html_text,
+        re.IGNORECASE,
+    )
+    if m:
+        return html_unescape(m.group(1).strip())
+    m = re.search(r"<title>([^<]+)</title>", html_text, re.IGNORECASE | re.DOTALL)
+    return html_unescape(m.group(1).strip()) if m else None
+
+
+def _article_resolve_url(url, base):
+    if not url:
+        return None
+    if url.startswith(("http://", "https://", "//")):
+        return "https:" + url if url.startswith("//") else url
+    parsed_base = urlparse(base)
+    if url.startswith("/"):
+        return f"{parsed_base.scheme}://{parsed_base.netloc}{url}"
+    return f"{parsed_base.scheme}://{parsed_base.netloc}/{url.lstrip('/')}"
+
+
+def _article_extract_main_html(html_text):
+    """Crude readability: prefer <article>, then <main>, then largest <div>."""
+    for tag in ("article", "main"):
+        m = re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", html_text, re.IGNORECASE | re.DOTALL)
+        if m and len(m.group(1)) > 500:
+            return m.group(1)
+    # Fallback: take everything between <body>...</body> minus scripts/styles.
+    m = re.search(r"<body\b[^>]*>(.*?)</body>", html_text, re.IGNORECASE | re.DOTALL)
+    return m.group(1) if m else html_text
+
+
+def _article_sanitize(inner_html):
+    """Strip scripts, styles, iframes, and on* handlers from extracted body."""
+    inner_html = re.sub(r"<script\b.*?</script>", "", inner_html, flags=re.IGNORECASE | re.DOTALL)
+    inner_html = re.sub(r"<style\b.*?</style>", "", inner_html, flags=re.IGNORECASE | re.DOTALL)
+    inner_html = re.sub(r"<iframe\b.*?</iframe>", "", inner_html, flags=re.IGNORECASE | re.DOTALL)
+    inner_html = re.sub(r"\son\w+=\"[^\"]*\"", "", inner_html, flags=re.IGNORECASE)
+    inner_html = re.sub(r"\son\w+='[^']*'", "", inner_html, flags=re.IGNORECASE)
+    return inner_html
+
+
+def _article_render_reader(html_text, source_url, theme):
+    """Render extracted article content with our site theme wrapper."""
+    title = _article_extract_title(html_text) or "Untitled"
+    body = _article_sanitize(_article_extract_main_html(html_text))
+    bg = "#0b1020" if theme == "dark" else "#fafbff"
+    fg = "#e7e9ff" if theme == "dark" else "#0f172a"
+    accent = "#7dd3fc" if theme == "dark" else "#0369a1"
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<base href="{html_escape(source_url)}">
+<title>{html_escape(title)}</title>
+<style>
+  body {{ margin:0; padding:24px 28px; background:{bg}; color:{fg};
+         font:16px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif;
+         max-width:760px; margin-left:auto; margin-right:auto; }}
+  h1,h2,h3,h4 {{ line-height:1.25; }}
+  a {{ color:{accent}; }}
+  img, video {{ max-width:100%; height:auto; border-radius:8px; }}
+  pre, code {{ font-family:'SF Mono', Menlo, Monaco, Consolas, monospace; }}
+  pre {{ background:rgba(127,127,127,0.12); padding:12px; border-radius:8px; overflow-x:auto; }}
+  blockquote {{ border-left:3px solid {accent}; padding-left:14px; color:rgba(127,127,127,0.95); margin:18px 0; }}
+  .article-modal-source-banner {{ font-size:12px; opacity:0.65; margin-bottom:14px; }}
+</style></head>
+<body>
+<div class="article-modal-source-banner">Source: <a href="{html_escape(source_url)}" target="_blank" rel="noopener">{html_escape(source_url)}</a></div>
+<h1>{html_escape(title)}</h1>
+{body}
+</body></html>
+"""
+
+
+def _article_render_error(source_url, error_msg, theme):
+    bg = "#0b1020" if theme != "light" else "#fafbff"
+    fg = "#e7e9ff" if theme != "light" else "#0f172a"
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Article unavailable</title>
+<style>body{{margin:0;padding:40px;background:{bg};color:{fg};font:14px/1.6 -apple-system,sans-serif;}}
+a{{color:#7dd3fc}}</style></head>
+<body>
+<h2>Article preview unavailable</h2>
+<p>We couldn't fetch this article in reader mode: {html_escape(error_msg)}</p>
+<p><a href="{html_escape(source_url)}" target="_blank" rel="noopener">Open original →</a></p>
+</body></html>
+"""
+
+
 def _rss_feed_xml():
     site_url = (os.environ.get("NEWSLETTER_SITE_URL") or "https://alexpavsky.com").strip() or "https://alexpavsky.com"
     feed_url = site_url.rstrip("/") + "/rss.xml"
@@ -2753,6 +2896,60 @@ class Handler(SimpleHTTPRequestHandler):
             conn.close()
             self._json(200, {"posts": posts})
             return
+
+        # ── Live Feed: server-side RSS aggregation ─────────────────────────
+        # Returns the same cached articles used by the newsletter pipeline.
+        # The frontend (script.js#fetchAllFeeds) calls this on page load;
+        # the empty-on-first-load bug was here returning 404, which forced
+        # the slow allorigins.win browser fallback that often timed out.
+        if path == "/api/feed":
+            try:
+                articles = _feed_cached_articles()
+                self._json(200, {"articles": articles[:60]})
+            except Exception as e:
+                log.warning("api/feed failed: %s", e)
+                self._json(200, {"articles": []})
+            return
+
+        # ── Article modal: OG image + page rendering ───────────────────────
+        # The 3 endpoints below are all called by openArticleModal() in
+        # script.js. Before this fix they 404'd → modal showed an http.server
+        # error page instead of the article.
+        if path in ("/api/article-proxy", "/api/article-page", "/api/article-embed"):
+            target_url = (qs.get("url", [""])[0] or "").strip()
+            if not target_url or not target_url.startswith(("http://", "https://")):
+                if path == "/api/article-proxy":
+                    self._json(400, {"error": "url parameter required"})
+                else:
+                    self._html(400, "<html><body><p>Missing or invalid url parameter.</p></body></html>")
+                return
+            try:
+                html_text, final_url = _article_fetch(target_url)
+            except Exception as e:
+                log.info("article fetch failed for %s: %s", target_url, e)
+                if path == "/api/article-proxy":
+                    self._json(200, {"image": None, "title": None, "error": str(e)[:120]})
+                else:
+                    self._html(
+                        200,
+                        _article_render_error(target_url, str(e)[:200], qs.get("theme", ["dark"])[0]),
+                    )
+                return
+
+            if path == "/api/article-proxy":
+                self._json(200, {
+                    "image": _article_extract_og_image(html_text, final_url),
+                    "title": _article_extract_title(html_text),
+                })
+                return
+
+            # article-page (reader mode) and article-embed (full page) both
+            # now serve our reader-rendered HTML — cross-origin iframe of
+            # the live site usually breaks anyway (X-Frame-Options / CSP).
+            theme = (qs.get("theme", ["dark"])[0] or "dark").lower()
+            self._html(200, _article_render_reader(html_text, final_url, theme))
+            return
+
         super().do_GET()
 
     def do_OPTIONS(self):
