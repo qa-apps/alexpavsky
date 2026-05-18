@@ -4004,19 +4004,73 @@
         var spd = parseFloat(speedInput.value) || 0.6;
         var paused = false;
         var lastTs = null;
+        var userScrolling = false;   // true while user is actively wheeling/touching
+        var userIdleTimer = null;
+
+        function wrapOffset() {
+            var itemsHeight = track.scrollHeight / 3;
+            if (itemsHeight <= 0) return;
+            // Keep offset inside [0, itemsHeight) so the seamless loop is preserved.
+            if (offset >= itemsHeight) offset -= itemsHeight;
+            if (offset < 0) offset += itemsHeight;
+        }
+
+        function applyTranslate() {
+            track.style.transform = 'translateY(' + (-offset) + 'px)';
+        }
 
         function step(ts) {
-            if (lastTs !== null && !paused) {
+            if (lastTs !== null && !paused && !userScrolling) {
                 var dt = ts - lastTs;
                 offset += spd * (dt / 16.6667);
-                var itemsHeight = track.scrollHeight / 3;
-                if (itemsHeight > 0 && offset >= itemsHeight) offset -= itemsHeight;
-                track.style.transform = 'translateY(' + (-offset) + 'px)';
+                wrapOffset();
+                applyTranslate();
             }
             lastTs = ts;
             requestAnimationFrame(step);
         }
         requestAnimationFrame(step);
+
+        // Manual scroll: trackpad wheel and touch swipe. Both pause the
+        // auto-scroll for ~1.5s after the last gesture, then it resumes.
+        function bumpUserActivity() {
+            userScrolling = true;
+            clearTimeout(userIdleTimer);
+            userIdleTimer = setTimeout(function () { userScrolling = false; }, 1500);
+        }
+
+        var viewport = rail.querySelector('.live-viewport');
+        if (viewport) {
+            viewport.addEventListener('wheel', function (e) {
+                e.preventDefault();
+                offset += e.deltaY;
+                wrapOffset();
+                applyTranslate();
+                bumpUserActivity();
+            }, { passive: false });
+
+            // Touch support (mobile + trackpad on touchscreens).
+            var touchStartY = null;
+            var touchStartOffset = 0;
+            viewport.addEventListener('touchstart', function (e) {
+                if (!e.touches || !e.touches.length) return;
+                touchStartY = e.touches[0].clientY;
+                touchStartOffset = offset;
+                bumpUserActivity();
+            }, { passive: true });
+            viewport.addEventListener('touchmove', function (e) {
+                if (touchStartY === null) return;
+                var dy = e.touches[0].clientY - touchStartY;
+                offset = touchStartOffset - dy;
+                wrapOffset();
+                applyTranslate();
+                bumpUserActivity();
+            }, { passive: true });
+            viewport.addEventListener('touchend', function () {
+                touchStartY = null;
+                bumpUserActivity();
+            });
+        }
 
         // Controls.
         handle.addEventListener('click', function () {
@@ -4043,7 +4097,6 @@
             }
         });
         // Pause while user hovers the list (so they can read).
-        var viewport = rail.querySelector('.live-viewport');
         if (viewport) {
             viewport.addEventListener('mouseenter', function () { paused = true; });
             viewport.addEventListener('mouseleave', function () {
