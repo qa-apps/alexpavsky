@@ -3928,4 +3928,140 @@
     attackgenRunBtn.addEventListener('click', runAttackGenerator);
     attackgenClearBtn.addEventListener('click', resetAttackGen);
 
+    // ─── LIVE RAIL ──────────────────────────────────────────────────────
+    // Floating left-edge pill that opens a vertical news ticker.
+    // Pulls articles from /api/feed (same source used by the main Live Feed
+    // section), shows the 10 most recent, and makes each item a clickable
+    // link that opens the source article in a new tab.
+    (function initLiveRail() {
+        var rail = document.getElementById('liveRail');
+        if (!rail) return;
+        var handle = document.getElementById('liveHandle');
+        var closeBtn = document.getElementById('liveClose');
+        var track = document.getElementById('liveTrack');
+        var pauseBtn = document.getElementById('livePauseBtn');
+        var speedInput = document.getElementById('liveSpeed');
+        if (!handle || !closeBtn || !track || !pauseBtn || !speedInput) return;
+
+        var FALLBACK_NEWS = [
+            { category: 'ai', title: 'Anthropic ships Claude 4.x with extended context', source: 'anthropic.com', link: 'https://www.anthropic.com/news', date: '' },
+            { category: 'qa', title: 'Playwright adds native MCP test orchestration', source: 'playwright.dev', link: 'https://playwright.dev', date: '' },
+            { category: 'dev', title: 'GitHub Copilot Workspace exits beta', source: 'github.blog', link: 'https://github.blog', date: '' },
+        ];
+
+        function catKey(c) {
+            var k = (c || '').toLowerCase();
+            if (k === 'ai' || k === 'qa' || k === 'dev') return k;
+            return 'ai';
+        }
+
+        function badgeFor(c) {
+            var k = catKey(c);
+            return k === 'qa' ? 'ALERT' : (k === 'dev' ? 'LIVE' : 'ALERT');
+        }
+
+        function timeAgo(iso) {
+            if (!iso) return '';
+            var d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            var diff = (Date.now() - d.getTime()) / 1000;
+            if (diff < 60) return Math.floor(diff) + 's ago';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        function escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function renderTrack(items) {
+            // Duplicate 3× so the upward scroll loops seamlessly.
+            var html = items.map(function (n) {
+                var ago = timeAgo(n.date);
+                var href = n.link || '#';
+                return (
+                    '<a class="live-item cat-' + catKey(n.category) + '" ' +
+                    'href="' + escapeHtml(href) + '" ' +
+                    'target="_blank" rel="noopener noreferrer" ' +
+                    'title="' + escapeHtml(n.title) + '">' +
+                    '<div class="live-meta">' +
+                        '<span class="live-badge">' + badgeFor(n.category) + '</span>' +
+                        (ago ? '<span>' + escapeHtml(ago) + '</span>' : '') +
+                    '</div>' +
+                    '<div class="live-item-title">' + escapeHtml(n.title) + '</div>' +
+                    '<div class="live-src">' + escapeHtml(n.source || '') + '</div>' +
+                    '</a>'
+                );
+            }).join('');
+            track.innerHTML = html + html + html;
+        }
+
+        // Scroll animation state.
+        var offset = 0;
+        var spd = parseFloat(speedInput.value) || 0.6;
+        var paused = false;
+        var lastTs = null;
+
+        function step(ts) {
+            if (lastTs !== null && !paused) {
+                var dt = ts - lastTs;
+                offset += spd * (dt / 16.6667);
+                var itemsHeight = track.scrollHeight / 3;
+                if (itemsHeight > 0 && offset >= itemsHeight) offset -= itemsHeight;
+                track.style.transform = 'translateY(' + (-offset) + 'px)';
+            }
+            lastTs = ts;
+            requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+
+        // Controls.
+        handle.addEventListener('click', function () {
+            var nowOpen = !rail.classList.contains('open');
+            rail.classList.toggle('open', nowOpen);
+            handle.setAttribute('aria-expanded', String(nowOpen));
+        });
+        closeBtn.addEventListener('click', function () {
+            rail.classList.remove('open');
+            handle.setAttribute('aria-expanded', 'false');
+        });
+        pauseBtn.addEventListener('click', function () {
+            paused = !paused;
+            pauseBtn.textContent = paused ? 'PLAY' : 'PAUSE';
+            pauseBtn.classList.toggle('paused', paused);
+        });
+        speedInput.addEventListener('input', function (e) {
+            spd = parseFloat(e.target.value) || 0.6;
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && rail.classList.contains('open')) {
+                rail.classList.remove('open');
+                handle.setAttribute('aria-expanded', 'false');
+            }
+        });
+        // Pause while user hovers the list (so they can read).
+        var viewport = rail.querySelector('.live-viewport');
+        if (viewport) {
+            viewport.addEventListener('mouseenter', function () { paused = true; });
+            viewport.addEventListener('mouseleave', function () {
+                if (!pauseBtn.classList.contains('paused')) paused = false;
+            });
+        }
+
+        // Pull live articles from /api/feed; fall back to a static seed list
+        // if the endpoint is unreachable (preserves the widget on any error).
+        renderTrack(FALLBACK_NEWS);
+        fetch(apiUrl('/api/feed'))
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data || !Array.isArray(data.articles) || !data.articles.length) return;
+                renderTrack(data.articles.slice(0, 10));
+                offset = 0;
+            })
+            .catch(function () { /* keep fallback */ });
+    })();
+
 })();
