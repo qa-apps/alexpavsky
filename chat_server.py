@@ -3101,32 +3101,42 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(503, {"error": "maintenance", "message": "Site is under maintenance."})
             return
 
-        if self.path == "/api/subscribe":
-            return self._handle_subscribe()
-        if self.path == "/api/newsletter/run-now":
-            return self._handle_newsletter_run_now()
-        if self.path == "/api/auth/register":
-            return self._handle_register()
-        if self.path == "/api/auth/login":
-            return self._handle_login()
-        if self.path == "/api/auth/logout":
-            return self._handle_logout()
-        if self.path == "/api/user/messages":
-            return self._handle_user_message()
-        if self.path == "/api/admin/reply":
-            return self._handle_admin_reply()
-        if self.path == "/api/forum/posts":
-            return self._handle_forum_post()
-        if self.path == "/api/auth/forgot":
-            return self._handle_forgot_password()
-        if self.path == "/api/auth/reset":
-            return self._handle_reset_password()
-        if self.path == "/api/challenge":
-            return self._handle_challenge()
-        if self.path == "/api/attack-generator":
-            return self._handle_attack_generator()
-        if self.path == "/api/hallucination":
-            return self._handle_hallucination()
+        # Routed POST endpoints. Each maps to a _handle_<name>() method.
+        # If a method is missing (refactor regression), the dispatcher
+        # returns 501 cleanly instead of letting AttributeError bubble up
+        # to BaseHTTPRequestHandler and surface as nginx 502 (which both
+        # crashes user requests AND leaks "this endpoint exists but is
+        # broken" — useful info for an attacker fingerprinting the site).
+        POST_ROUTES = {
+            "/api/subscribe": "_handle_subscribe",
+            "/api/newsletter/run-now": "_handle_newsletter_run_now",
+            "/api/auth/register": "_handle_register",
+            "/api/auth/login": "_handle_login",
+            "/api/auth/logout": "_handle_logout",
+            "/api/user/messages": "_handle_user_message",
+            "/api/admin/reply": "_handle_admin_reply",
+            "/api/forum/posts": "_handle_forum_post",
+            "/api/auth/forgot": "_handle_forgot_password",
+            "/api/auth/reset": "_handle_reset_password",
+            "/api/challenge": "_handle_challenge",
+            "/api/attack-generator": "_handle_attack_generator",
+            "/api/hallucination": "_handle_hallucination",
+        }
+        handler_name = POST_ROUTES.get(self.path)
+        if handler_name is not None:
+            handler = getattr(self, handler_name, None)
+            if handler is None:
+                # Drain the request body so the client doesn't see
+                # ConnectionResetError on the way out.
+                try:
+                    length = int(self.headers.get("Content-Length", "0") or 0)
+                    if length:
+                        self.rfile.read(min(length, 1_000_000))
+                except Exception:
+                    pass
+                self._json(501, {"error": "not_implemented"})
+                return
+            return handler()
         if self.path != "/api/chat":
             self._json(404, {"error": "not_found"})
             return
