@@ -4096,6 +4096,14 @@
                 handle.setAttribute('aria-expanded', 'false');
             }
         });
+        // Click anywhere outside the rail (and outside the handle, which
+        // toggles itself) closes the drawer. Standard modal/drawer UX.
+        document.addEventListener('click', function (e) {
+            if (!rail.classList.contains('open')) return;
+            if (rail.contains(e.target)) return;     // click inside drawer/handle = ignore
+            rail.classList.remove('open');
+            handle.setAttribute('aria-expanded', 'false');
+        });
         // Pause while user hovers the list (so they can read).
         if (viewport) {
             viewport.addEventListener('mouseenter', function () { paused = true; });
