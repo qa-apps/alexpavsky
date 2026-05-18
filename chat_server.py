@@ -1646,7 +1646,12 @@ def _feed_collect_articles():
 
 
 def _feed_cached_articles():
-    ttl = int(os.environ.get("FEED_CACHE_SECONDS", "1800") or "1800")
+    # 24h cache by default — the LIVE rail + main Live Feed both surface
+    # the same 10 top items, and we want them stable across a day so
+    # repeat visitors see consistent content (and we avoid hammering
+    # 13+ RSS sources on every request). Override with FEED_CACHE_SECONDS
+    # env var when you need fresher updates.
+    ttl = int(os.environ.get("FEED_CACHE_SECONDS", "86400") or "86400")
     now_ts = time.time()
     if _feed_cache["articles"] and now_ts - _feed_cache["fetched_at"] < ttl:
         return _feed_cache["articles"]
