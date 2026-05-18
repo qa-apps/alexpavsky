@@ -174,9 +174,9 @@
     }
 
     // ─── Theme Toggle ───
+    // Dark theme is ALWAYS the default on page load/reload.
+    // The user can toggle to light within the session, but it does not persist across reloads.
     var themeToggle = document.getElementById('theme-toggle');
-    var THEME_KEY = 'alexpavsky_theme';
-    var savedTheme = localStorage.getItem(THEME_KEY) || 'dark';
 
     function applyTheme(theme) {
         var body = document.body;
@@ -188,10 +188,9 @@
             body.classList.remove('light-mode');
             if (icon) icon.className = 'fas fa-sun';
         }
-        localStorage.setItem(THEME_KEY, theme);
     }
 
-    applyTheme(savedTheme);
+    applyTheme('dark');
 
     if (themeToggle) {
         themeToggle.addEventListener('click', function () {
@@ -624,7 +623,14 @@
         card.href = article.link;
         card.setAttribute('data-category', article.category);
         
-        var plainDesc = stripHtml(article.description);
+        var plainDesc = stripHtml(article.description || '');
+        // Hacker News descriptions are URL/points metadata — replace with a generic snippet
+        if (/^Article URL:/i.test(plainDesc) || /Comments URL:/i.test(plainDesc)) {
+            plainDesc = 'Discussion on Hacker News — click to read the full article.';
+        }
+        if (!plainDesc) {
+            plainDesc = 'Click to read the full article.';
+        }
         if (plainDesc.length > 120) plainDesc = plainDesc.substring(0, 117) + '...';
 
         card.innerHTML =
@@ -679,13 +685,14 @@
         toShow.forEach(function (article) {
             grid.appendChild(renderArticle(article));
         });
+        // Duplicate content once so the auto-scroll can wrap invisibly
         toShow.forEach(function (article) {
             grid.appendChild(renderArticle(article));
         });
         setupFeedCarouselMotion();
     }
 
-    var FEED_STORAGE_KEY = 'alexpavsky_feed_cache';
+    var FEED_STORAGE_KEY = 'alexpavsky_feed_cache_v2';
 
     function saveFeedToStorage(articles) {
         try {
@@ -817,34 +824,71 @@
         if (sourceEl) sourceEl.textContent = source;
         if (titleEl) titleEl.textContent = title || 'Untitled';
         var heroEl = document.getElementById('article-modal-hero');
-        if (descEl) {
-            // Always show the RSS description — it's clean and curated by the publisher
-            descEl.textContent = desc || 'No preview available. Click "Read full article" to open the original.';
-            if (heroEl) heroEl.style.backgroundImage = '';
-            // Hit the proxy only to fetch the hero image (no text replacement)
-            fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(url)))
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (data) {
-                    if (data && data.image && heroEl) {
-                        heroEl.style.backgroundImage = 'url(' + data.image + ')';
-                    }
-                    // Only use proxy text if RSS gave nothing
-                    if (!desc && data && data.content) {
-                        descEl.textContent = data.content;
-                    }
-                })
-                .catch(function () { /* image load failed — description already shown */ });
+
+        // For Hacker News, the RSS link points to the comments page but the real article URL
+        // is embedded in the description as "Article URL: <url>". Extract it.
+        var fetchUrl = url;
+        var displayUrl = url;
+        var hnMatch = (desc || '').match(/Article URL:\s*(https?:\/\/\S+)/i);
+        if (hnMatch && hnMatch[1]) {
+            fetchUrl = hnMatch[1];
+            displayUrl = hnMatch[1];
         }
+
+        if (heroEl) heroEl.style.backgroundImage = '';
+        // Load iframe with reader-mode content served from our own server
+        var iframeEl = document.getElementById('article-modal-iframe');
+        var loadingEl = document.getElementById('article-modal-loading');
+        var viewToggle = document.getElementById('article-modal-view-toggle');
+        function loadIframeView(view) {
+            if (!iframeEl) return;
+            iframeEl.classList.remove('loaded');
+            if (loadingEl) loadingEl.style.display = 'flex';
+            iframeEl.onload = function () {
+                iframeEl.classList.add('loaded');
+                if (loadingEl) loadingEl.style.display = 'none';
+            };
+            if (view === 'full') {
+                iframeEl.removeAttribute('sandbox');
+                iframeEl.src = apiUrl('/api/article-embed?url=' + encodeURIComponent(fetchUrl));
+            } else {
+                iframeEl.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+                var theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
+                iframeEl.src = apiUrl('/api/article-page?url=' + encodeURIComponent(fetchUrl) + '&theme=' + theme);
+            }
+        }
+        // Default to Full page (live site with design + images). User can toggle to Reader.
+        if (viewToggle) {
+            var btns = viewToggle.querySelectorAll('.article-modal-view-btn');
+            btns.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === 'full'); });
+            btns.forEach(function (b) {
+                b.onclick = function () {
+                    btns.forEach(function (x) { x.classList.remove('active'); });
+                    b.classList.add('active');
+                    loadIframeView(b.getAttribute('data-view'));
+                };
+            });
+        }
+        loadIframeView('full');
+        // Also fetch OG image for hero background
+        fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(fetchUrl)))
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (data && data.image && heroEl) {
+                    heroEl.style.backgroundImage = 'url(' + data.image + ')';
+                }
+            })
+            .catch(function () {});
         if (metaEl) {
             var parts = [];
             if (category) parts.push('<span class="article-modal-cat">' + getCategoryLabel(category) + '</span>');
             if (date) parts.push('<span class="article-modal-date"><i class="far fa-clock"></i> ' + formatFeedTimeAgo(date) + '</span>');
             metaEl.innerHTML = parts.join('');
         }
-        if (linkEl) linkEl.href = url;
+        if (linkEl) linkEl.href = displayUrl;
         if (copyBtn) {
             copyBtn.onclick = function () {
-                navigator.clipboard.writeText(url).then(function () {
+                navigator.clipboard.writeText(displayUrl).then(function () {
                     copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
                     setTimeout(function () { copyBtn.innerHTML = '<i class="fas fa-link"></i> Copy link'; }, 2000);
                 });
@@ -924,21 +968,9 @@
         if (ytCarouselState && ytCarouselState.rafId) {
             cancelAnimationFrame(ytCarouselState.rafId);
         }
-        if (ytCarouselState && ytCarouselState.wrapTimer) {
-            clearTimeout(ytCarouselState.wrapTimer);
-        }
-        function getHalfWidth() {
-            return content.scrollWidth / 2;
-        }
-        function normalizeScroll() {
-            var half = getHalfWidth();
-            if (!half) return;
-            if (track.scrollLeft >= half) track.scrollLeft -= half;
-            if (track.scrollLeft < 0) track.scrollLeft += half;
-        }
+        function halfWidth() { return content.scrollWidth / 2; }
         ytCarouselState = {
             rafId: 0,
-            wrapTimer: 0,
             pauseUntil: 0,
             holdDir: 0,
             pause: function (ms) {
@@ -946,15 +978,10 @@
             },
             manualScroll: function (dir) {
                 ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
-                normalizeScroll();
                 track.scrollBy({
                     left: dir * getYoutubeScrollStep(),
                     behavior: 'smooth'
                 });
-                clearTimeout(ytCarouselState.wrapTimer);
-                ytCarouselState.wrapTimer = setTimeout(function () {
-                    normalizeScroll();
-                }, 700);
             },
             startHold: function (dir) {
                 ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
@@ -965,16 +992,30 @@
                 ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
             }
         };
+        // Pause auto-scroll on manual user input
+        if (!track.__pauseListenerInstalled) {
+            ['wheel', 'touchstart', 'touchmove', 'pointerdown'].forEach(function (ev) {
+                track.addEventListener(ev, function () {
+                    if (ytCarouselState) ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
+                }, { passive: true });
+            });
+            track.__pauseListenerInstalled = true;
+        }
         function tick() {
-            normalizeScroll();
             if (ytCarouselState.holdDir) {
                 track.scrollLeft += ytCarouselState.holdDir * (YT_AUTOSCROLL_PX_PER_FRAME * YT_HOLD_SCROLL_MULTIPLIER);
             } else if (Date.now() >= ytCarouselState.pauseUntil && !track.matches(':hover')) {
                 track.scrollLeft += YT_AUTOSCROLL_PX_PER_FRAME;
             }
+            var h = halfWidth();
+            if (h > 0 && track.scrollLeft >= h) {
+                track.scrollLeft -= h;
+            }
+            if (track.scrollLeft < 0) {
+                track.scrollLeft += h;
+            }
             ytCarouselState.rafId = requestAnimationFrame(tick);
         }
-        track.scrollLeft = 0;
         tick();
     }
 
@@ -1257,46 +1298,40 @@
         if (feedCarouselState && feedCarouselState.rafId) {
             cancelAnimationFrame(feedCarouselState.rafId);
         }
-        if (feedCarouselState && feedCarouselState.wrapTimer) {
-            clearTimeout(feedCarouselState.wrapTimer);
-        }
-        function getHalfWidth() {
-            return grid.scrollWidth / 2;
-        }
-        function normalizeScroll() {
-            var half = getHalfWidth();
-            if (!half) return;
-            if (grid.scrollLeft >= half) grid.scrollLeft -= half;
-            if (grid.scrollLeft < 0) grid.scrollLeft += half;
-        }
+        function halfWidth() { return grid.scrollWidth / 2; }
         feedCarouselState = {
             rafId: 0,
-            wrapTimer: 0,
             pauseUntil: 0,
             pause: function (ms) {
                 feedCarouselState.pauseUntil = Date.now() + ms;
             },
             manualScroll: function (dir) {
                 feedCarouselState.pause(FEED_RESUME_AFTER_INTERACTION_MS);
-                normalizeScroll();
                 grid.scrollBy({
                     left: dir * FEED_MANUAL_SCROLL_STEP,
                     behavior: 'smooth'
                 });
-                clearTimeout(feedCarouselState.wrapTimer);
-                feedCarouselState.wrapTimer = setTimeout(function () {
-                    normalizeScroll();
-                }, 700);
             }
         };
+        // Pause auto-scroll when user scrolls manually (wheel/trackpad/touch)
+        if (!grid.__pauseListenerInstalled) {
+            ['wheel', 'touchstart', 'touchmove', 'pointerdown'].forEach(function (ev) {
+                grid.addEventListener(ev, function () {
+                    if (feedCarouselState) feedCarouselState.pause(FEED_RESUME_AFTER_INTERACTION_MS);
+                }, { passive: true });
+            });
+            grid.__pauseListenerInstalled = true;
+        }
         function tick() {
-            normalizeScroll();
             if (Date.now() >= feedCarouselState.pauseUntil && !grid.matches(':hover')) {
                 grid.scrollLeft += FEED_AUTOSCROLL_PX_PER_FRAME;
+                var h = halfWidth();
+                if (h > 0 && grid.scrollLeft >= h) {
+                    grid.scrollLeft -= h;
+                }
             }
             feedCarouselState.rafId = requestAnimationFrame(tick);
         }
-        grid.scrollLeft = 0;
         tick();
     }
 
@@ -2694,6 +2729,7 @@
         var currentAbort = null;
         var pendingFiles = [];
         var conversationHistory = [];
+        var activeContextAttachments = [];
         var maxAttachments = 4;
         var maxFileBytes = 25 * 1024 * 1024;
         var maxTextChars = 12000;
@@ -2939,6 +2975,7 @@
                 chatInput.value = '';
                 pendingFiles = [];
                 conversationHistory = [];
+                activeContextAttachments = [];
                 renderPendingFiles();
                 if (chatClearInput) chatClearInput.classList.remove('visible');
             });
@@ -3270,6 +3307,28 @@
             return 'Please analyze the attached file and tell me the important details.';
         }
 
+        function cloneAttachments(items) {
+            return (items || []).map(function (attachment) {
+                return Object.assign({}, attachment);
+            });
+        }
+
+        function shouldReuseAttachmentContext(message) {
+            if (!activeContextAttachments.length) return false;
+            var text = (message || '').trim();
+            if (!text) return true;
+            if (text.length <= 140) return true;
+            return /(image|photo|picture|screenshot|file|document|attachment|resume|cv|pdf|doc|docx|txt|картин|файл|документ|вложен|резюм|скрин|изображен)/i.test(text);
+        }
+
+        function resolveEffectiveAttachments(message, attachments) {
+            if (attachments && attachments.length) {
+                activeContextAttachments = cloneAttachments(attachments);
+                return attachments;
+            }
+            return shouldReuseAttachmentContext(message) ? cloneAttachments(activeContextAttachments) : [];
+        }
+
         // ── Messages ──
         function addUserMessage(text, attachments) {
             var safeText = text ? '<p>' + escapeHtml(text) + '</p>' : '';
@@ -3350,13 +3409,14 @@
 
             try {
                 var attachments = await serializeAttachments(queuedFiles);
-                var requestMessage = buildAttachmentAnalysisPrompt(message, attachments);
+                var effectiveAttachments = resolveEffectiveAttachments(message, attachments);
+                var requestMessage = buildAttachmentAnalysisPrompt(message, effectiveAttachments);
                 addUserMessage(message, attachments);
                 chatInput.value = '';
                 if (chatClearInput) chatClearInput.classList.remove('visible');
                 clearPendingFiles();
                 showTypingIndicator();
-                await handleBotResponse(requestMessage, attachments);
+                await handleBotResponse(requestMessage, effectiveAttachments);
             } catch (err) {
                 hideTypingIndicator();
                 addBotMessage('Could not process the request. Please try again.');
