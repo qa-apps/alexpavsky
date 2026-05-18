@@ -1,10 +1,13 @@
 import base64
 import hashlib
 import io
+import ipaddress
 import json
 import logging
 import os
 import re
+import secrets
+import socket
 import sqlite3
 import smtplib
 import ssl
@@ -509,7 +512,14 @@ def _load_dotenv():
 _load_dotenv()
 
 MAINTENANCE_FLAG = Path(__file__).resolve().parent / "maintenance.flag"
-MAINTENANCE_KEY = os.environ.get("MAINTENANCE_KEY", "alexpavsky-maint-2026")
+# Never fall back to a hardcoded default — the previous default was already
+# committed to git history. If MAINTENANCE_KEY is missing in env, generate a
+# random ephemeral one per process so no attacker can guess it from source.
+# A real key must be set in production .env to use /api/maintenance-ui.
+MAINTENANCE_KEY = os.environ.get("MAINTENANCE_KEY") or secrets.token_urlsafe(32)
+if not os.environ.get("MAINTENANCE_KEY"):
+    log = logging.getLogger("chat-server")  # may not be configured yet
+    print("WARNING: MAINTENANCE_KEY not set; generated ephemeral key (maintenance UI unreachable until env is set).")
 
 def _is_maintenance():
     return MAINTENANCE_FLAG.exists()
@@ -1653,19 +1663,73 @@ _ARTICLE_UA = (
 )
 
 
+def _article_url_is_safe(url):
+    """SSRF guard: only allow http(s) URLs that resolve to public IPs.
+
+    Without this, /api/article-page?url=http://127.0.0.1:5050 (pgAdmin) or
+    http://169.254.169.254 (cloud metadata) would let any web visitor make
+    the server fetch internal services and return their content.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "invalid url"
+    if parsed.scheme not in ("http", "https"):
+        return False, f"scheme {parsed.scheme!r} not allowed"
+    host = parsed.hostname
+    if not host:
+        return False, "no host"
+    # Block obvious aliases even before DNS resolution.
+    lowered = host.lower()
+    if lowered in ("localhost", "ip6-localhost", "ip6-loopback"):
+        return False, "loopback hostname blocked"
+    if lowered.endswith(".local") or lowered.endswith(".internal") or lowered.endswith(".localdomain"):
+        return False, "private DNS suffix blocked"
+    # Resolve hostname and reject if ANY answer is non-public.
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror as e:
+        return False, f"dns failed: {e}"
+    for fam, _t, _p, _c, sockaddr in infos:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False, f"unparseable ip {ip_str}"
+        # is_global is False for: private, loopback, link-local (169.254),
+        # multicast, reserved, unspecified. Exactly what we want to block.
+        if not ip.is_global:
+            return False, f"private/internal IP {ip_str}"
+    return True, ""
+
+
 def _article_fetch(url, timeout=10, max_bytes=2_000_000):
     """Fetch an article URL with a real UA, return (html, final_url).
 
     Caps response at max_bytes so a single bad source can't blow out the
     chat_server worker. Surface HTTP errors as Exception so the caller
     returns a friendly fallback page instead of leaking a stacktrace.
+
+    SSRF: pre-validates the URL resolves to a public IP. urlopen follows
+    redirects by default, so we also re-check the final URL after fetch
+    to block redirect-based SSRF (302 → http://127.0.0.1).
     """
+    ok, reason = _article_url_is_safe(url)
+    if not ok:
+        raise ValueError(f"refused fetch: {reason}")
     req = Request(url, headers={
         "User-Agent": _ARTICLE_UA,
         "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
         "Accept-Language": "en-US,en;q=0.9",
     })
     with urlopen(req, timeout=timeout) as resp:
+        # Redirect-based SSRF: urlopen follows 30x by default. Re-validate
+        # the final URL after redirects against the same rules.
+        final = resp.geturl() or url
+        if final != url:
+            ok2, reason2 = _article_url_is_safe(final)
+            if not ok2:
+                raise ValueError(f"refused redirected fetch to {final}: {reason2}")
         raw = resp.read(max_bytes + 1)
         if len(raw) > max_bytes:
             raw = raw[:max_bytes]
@@ -1679,7 +1743,7 @@ def _article_fetch(url, timeout=10, max_bytes=2_000_000):
             text = raw.decode(encoding, errors="replace")
         except LookupError:
             text = raw.decode("utf-8", errors="replace")
-        return text, resp.geturl() or url
+        return text, final
 
 
 def _article_extract_og_image(html_text, base_url):
@@ -1732,13 +1796,60 @@ def _article_extract_main_html(html_text):
     return m.group(1) if m else html_text
 
 
+_DANGEROUS_TAGS = (
+    "script", "style", "iframe", "object", "embed", "link", "meta",
+    "form", "input", "button", "select", "textarea", "svg", "math",
+    "video", "audio", "source", "track", "applet", "frame", "frameset",
+    "base",
+)
+
+
 def _article_sanitize(inner_html):
-    """Strip scripts, styles, iframes, and on* handlers from extracted body."""
-    inner_html = re.sub(r"<script\b.*?</script>", "", inner_html, flags=re.IGNORECASE | re.DOTALL)
-    inner_html = re.sub(r"<style\b.*?</style>", "", inner_html, flags=re.IGNORECASE | re.DOTALL)
-    inner_html = re.sub(r"<iframe\b.*?</iframe>", "", inner_html, flags=re.IGNORECASE | re.DOTALL)
-    inner_html = re.sub(r"\son\w+=\"[^\"]*\"", "", inner_html, flags=re.IGNORECASE)
-    inner_html = re.sub(r"\son\w+='[^']*'", "", inner_html, flags=re.IGNORECASE)
+    """Block-list HTML sanitizer for extracted article content.
+
+    Regex is not a real parser — defense in depth means we also serve the
+    rendered page with a strict CSP header (see _article_render_reader),
+    so even if a tag slips past, inline scripts cannot execute.
+
+    What this does:
+      1. Strip whole-element-and-content for dangerous tags (script,
+         style, iframe, svg, object, embed, form, link, meta, etc.).
+      2. Strip self-closing variants of those tags.
+      3. Remove every on*=... event handler attribute.
+      4. Neutralise javascript:, data:, vbscript: URIs inside href/src.
+      5. Strip inline style="..." (CSS-based XSS — expression(), url(js:))
+    """
+    for tag in _DANGEROUS_TAGS:
+        # Paired tags incl. content.
+        inner_html = re.sub(
+            rf"<{tag}\b[^>]*>.*?</{tag}\s*>",
+            "",
+            inner_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Self-closing or unclosed.
+        inner_html = re.sub(rf"<{tag}\b[^>]*/?>", "", inner_html, flags=re.IGNORECASE)
+    # Event handler attributes — onload, onerror, onclick, etc.
+    inner_html = re.sub(r"\son\w+\s*=\s*\"[^\"]*\"", "", inner_html, flags=re.IGNORECASE)
+    inner_html = re.sub(r"\son\w+\s*=\s*'[^']*'", "", inner_html, flags=re.IGNORECASE)
+    inner_html = re.sub(r"\son\w+\s*=\s*[^\s>]+", "", inner_html, flags=re.IGNORECASE)
+    # Dangerous URI schemes in href/src/action/formaction/poster/background.
+    # Replace with about:blank rather than dropping the attribute entirely.
+    inner_html = re.sub(
+        r'(\s(?:href|src|action|formaction|poster|background|xlink:href)\s*=\s*["\'])\s*(?:javascript|data|vbscript|file)\s*:[^"\']*(["\'])',
+        r"\1about:blank\2",
+        inner_html,
+        flags=re.IGNORECASE,
+    )
+    inner_html = re.sub(
+        r'(\s(?:href|src|action|formaction|poster|background)\s*=\s*)(?!["\'])\s*(?:javascript|data|vbscript|file):\S+',
+        r"\1about:blank",
+        inner_html,
+        flags=re.IGNORECASE,
+    )
+    # Inline style — kills CSS expression() / url(javascript:) tricks.
+    inner_html = re.sub(r'\sstyle\s*=\s*"[^"]*"', "", inner_html, flags=re.IGNORECASE)
+    inner_html = re.sub(r"\sstyle\s*=\s*'[^']*'", "", inner_html, flags=re.IGNORECASE)
     return inner_html
 
 
@@ -2490,10 +2601,13 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _html(self, status, html):
+    def _html(self, status, html, csp=None):
         data = html.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        if csp:
+            self.send_header("Content-Security-Policy", csp)
+        self.send_header("X-Content-Type-Options", "nosniff")
         self._cors()
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -2916,12 +3030,21 @@ class Handler(SimpleHTTPRequestHandler):
         # script.js. Before this fix they 404'd → modal showed an http.server
         # error page instead of the article.
         if path in ("/api/article-proxy", "/api/article-page", "/api/article-embed"):
+            # Strict CSP on rendered-article responses: even if the regex
+            # sanitizer misses a tag, the browser refuses inline scripts,
+            # frames, and remote subresources except images (over https).
+            article_csp = (
+                "default-src 'none'; img-src https: data:; "
+                "style-src 'unsafe-inline'; "
+                "font-src https:; base-uri 'none'; "
+                "frame-ancestors 'self'; form-action 'none'"
+            )
             target_url = (qs.get("url", [""])[0] or "").strip()
             if not target_url or not target_url.startswith(("http://", "https://")):
                 if path == "/api/article-proxy":
                     self._json(400, {"error": "url parameter required"})
                 else:
-                    self._html(400, "<html><body><p>Missing or invalid url parameter.</p></body></html>")
+                    self._html(400, "<html><body><p>Missing or invalid url parameter.</p></body></html>", csp=article_csp)
                 return
             try:
                 html_text, final_url = _article_fetch(target_url)
@@ -2933,6 +3056,7 @@ class Handler(SimpleHTTPRequestHandler):
                     self._html(
                         200,
                         _article_render_error(target_url, str(e)[:200], qs.get("theme", ["dark"])[0]),
+                        csp=article_csp,
                     )
                 return
 
@@ -2947,7 +3071,7 @@ class Handler(SimpleHTTPRequestHandler):
             # now serve our reader-rendered HTML — cross-origin iframe of
             # the live site usually breaks anyway (X-Frame-Options / CSP).
             theme = (qs.get("theme", ["dark"])[0] or "dark").lower()
-            self._html(200, _article_render_reader(html_text, final_url, theme))
+            self._html(200, _article_render_reader(html_text, final_url, theme), csp=article_csp)
             return
 
         super().do_GET()
