@@ -58,6 +58,7 @@ LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"  # via OpenRouter free tier
 QDRANT_COLLECTION = "documents"
 CHUNK_TOKENS = 500
 OVERLAP_TOKENS = 50
+RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "10"))
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("rag-api")
@@ -403,10 +404,8 @@ async def rag_query(req: QueryRequest):
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             filter_clause = ""
-            params: list = [query_vec, 5]
             if req.document_id:
                 filter_clause = "WHERE dc.document_id = %s"
-                params.append(req.document_id)
 
             cur.execute(
                 f"""
@@ -421,7 +420,7 @@ async def rag_query(req: QueryRequest):
                 ORDER BY dc.embedding <=> %s::vector
                 LIMIT %s
                 """,
-                [query_vec] + ([req.document_id] if req.document_id else []) + [query_vec, 5],
+                [query_vec] + ([req.document_id] if req.document_id else []) + [query_vec, RAG_TOP_K],
             )
             pg_results = [dict(r) for r in cur.fetchall()]
     finally:
@@ -438,7 +437,7 @@ async def rag_query(req: QueryRequest):
     q_hits = qdrant_client.search(
         collection_name=QDRANT_COLLECTION,
         query_vector=query_vec,
-        limit=5,
+        limit=RAG_TOP_K,
         query_filter=qdrant_filter,
     )
     qdrant_results = [
@@ -497,6 +496,10 @@ async def rag_query(req: QueryRequest):
     return {
         "answer": answer,
         "sources": sources,
+        # Full retrieved chunk text — what the LLM actually saw. Consumers that
+        # need to verify groundedness (Ragas faithfulness, manual audit) should
+        # read this instead of `sources[].content`, which is a 300-char preview.
+        "contexts": context_chunks,
         "metrics": {
             "faithfulness": round(faithfulness, 4),
             "answer_relevancy": round(answer_relevancy, 4),
