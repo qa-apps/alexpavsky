@@ -162,8 +162,10 @@
     }
 
     // ─── Theme Toggle ───
-    // Dark theme is ALWAYS the default on page load/reload.
-    // The user can toggle to light within the session, but it does not persist across reloads.
+    // Dark theme is the default on first visit. The user can toggle to
+    // light and the choice persists across reloads via localStorage —
+    // standard web UX expectation; covered by tests/theme.spec.ts.
+    var THEME_STORAGE_KEY = 'ap_theme';
     var themeToggle = document.getElementById('theme-toggle');
 
     function applyTheme(theme) {
@@ -178,12 +180,24 @@
         }
     }
 
-    applyTheme('dark');
+    function readStoredTheme() {
+        try {
+            var v = localStorage.getItem(THEME_STORAGE_KEY);
+            return (v === 'light' || v === 'dark') ? v : 'dark';
+        } catch (e) { return 'dark'; }
+    }
+    function writeStoredTheme(theme) {
+        try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) {}
+    }
+
+    applyTheme(readStoredTheme());
 
     if (themeToggle) {
         themeToggle.addEventListener('click', function () {
             var isLight = document.body.classList.contains('light-mode');
-            applyTheme(isLight ? 'dark' : 'light');
+            var next = isLight ? 'dark' : 'light';
+            applyTheme(next);
+            writeStoredTheme(next);
             themeToggle.style.transform = 'scale(0.8)';
             setTimeout(function () { themeToggle.style.transform = 'scale(1)'; }, 150);
         });

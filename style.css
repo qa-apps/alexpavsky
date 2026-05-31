@@ -3133,7 +3133,10 @@ button.auth-btn {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-secondary);
-    padding: 0.45rem 1rem;
+    /* Padding + min-height bring the hit area to ≥ 40px (close to the
+       WCAG 2.5.5 44pt target). Verified by tests/crossDevice.spec.ts. */
+    padding: 0.55rem 1rem;
+    min-height: 40px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 0.85rem;
