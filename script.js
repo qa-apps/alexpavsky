@@ -3298,6 +3298,26 @@
             return String((result && result.value) || '').trim();
         }
 
+        async function extractXlsxText(file) {
+            // Uses SheetJS (window.XLSX) loaded from cdnjs. Converts every
+            // sheet to CSV, joins with sheet-name headers so the LLM sees
+            // both the structure and the cell values. Caught by
+            // tests/chatbotRichInput.spec.ts Excel grounding test.
+            if (!window.XLSX) return '';
+            var arrayBuffer = await file.arrayBuffer();
+            var wb = window.XLSX.read(arrayBuffer, { type: 'array' });
+            var parts = [];
+            wb.SheetNames.forEach(function (name) {
+                var sheet = wb.Sheets[name];
+                if (!sheet) return;
+                var csv = window.XLSX.utils.sheet_to_csv(sheet);
+                if (csv && csv.trim()) {
+                    parts.push('=== Sheet: ' + name + ' ===\n' + csv.trim());
+                }
+            });
+            return parts.join('\n\n').trim();
+        }
+
         function serializeAttachments(files) {
             var promises = files.map(function (file) {
                 var base = { name: file.name, type: file.type || 'application/octet-stream', size: file.size };
@@ -3323,6 +3343,17 @@
                 }
                 if (lowerName.endsWith('.docx')) {
                     return extractDocxText(file)
+                        .then(function (text) {
+                            return text
+                                ? buildSerializedTextAttachment(base, text)
+                                : readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                        })
+                        .catch(function () {
+                            return readAsDataUrl(file).then(function (url) { return Object.assign(base, { kind: 'doc', data_url: url }); });
+                        });
+                }
+                if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+                    return extractXlsxText(file)
                         .then(function (text) {
                             return text
                                 ? buildSerializedTextAttachment(base, text)
