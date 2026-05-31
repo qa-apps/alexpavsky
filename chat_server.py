@@ -3657,6 +3657,55 @@ class Handler(SimpleHTTPRequestHandler):
             conn.close()
         return token
 
+    _HANDLE_RE = re.compile(r"^[a-z0-9]{4,8}$")
+
+    def _handle_forum_post(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+
+        text = (body.get("text") or "").strip()
+        handle = (body.get("handle") or "").strip().lower()
+        parent_id = body.get("parent_id") or None
+
+        if not text or len(text) > 4000:
+            self._json(400, {"error": "invalid_text"})
+            return
+        if not Handler._HANDLE_RE.match(handle):
+            self._json(400, {"error": "invalid_handle"})
+            return
+
+        ip_hash = _hash_ip(self._client_ip())
+        if not _check_auth_rate(ip_hash, "forum"):
+            self._json(429, {"error": "rate_limit", "message": "Too many posts. Try again later."})
+            return
+
+        # If the client is logged in, attach their user_id for moderation.
+        user = _get_user_by_token(self._get_token())
+        user_id = user["id"] if user else None
+
+        conn = _db()
+        try:
+            post_id = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO forum_posts (id, user_id, user_name, text, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (post_id, user_id, handle, text, parent_id, time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        log.info("forum.post: handle=%s len=%d parent=%s ip=%s", handle, len(text), bool(parent_id), ip_hash[:8])
+        self._json(200, {
+            "id": post_id,
+            "user_name": handle,
+            "text": text,
+            "parent_id": parent_id,
+            "created_at": time.time(),
+        })
+
     def _handle_subscribe(self):
         try:
             body = self._read_body()
