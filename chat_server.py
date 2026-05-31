@@ -3688,7 +3688,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(409, {"error": "email_in_use"})
                 return
 
-            user_id = secrets.token_urlsafe(16)
+            # Prod uses PostgreSQL where users.id is UUID. uuid.uuid4().hex
+            # serialises to a value PG accepts; SQLite (local dev) stores it
+            # as plain TEXT. token_urlsafe was rejected by PG as
+            # "invalid input syntax for type uuid".
+            user_id = uuid.uuid4().hex
             try:
                 conn.execute(
                     "INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
