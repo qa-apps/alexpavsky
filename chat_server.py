@@ -3657,6 +3657,52 @@ class Handler(SimpleHTTPRequestHandler):
             conn.close()
         return token
 
+    def _handle_subscribe(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+
+        email = (body.get("email") or "").strip().lower()
+        if not email or not Handler._AUTH_EMAIL_RE.match(email) or len(email) > 200:
+            self._json(400, {"error": "invalid_email"})
+            return
+
+        ip_hash = _hash_ip(self._client_ip())
+        if not _check_auth_rate(ip_hash, "subscribe"):
+            self._json(429, {"error": "rate_limit", "message": "Too many attempts. Try again later."})
+            return
+
+        conn = _db()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM subscribers WHERE LOWER(email) = ?", (email,)
+            ).fetchone()
+            if existing:
+                conn.close()
+                # Treat re-subscribe as success — don't leak that the email was already in.
+                self._json(200, {"message": "You're on the list!"})
+                return
+            try:
+                conn.execute(
+                    "INSERT INTO subscribers (id, email, ip_hash, created_at) VALUES (?, ?, ?, ?)",
+                    (uuid.uuid4().hex, email, ip_hash, time.time()),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.close()
+                self._json(200, {"message": "You're on the list!"})
+                return
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        log.info("subscribe: email=%s ip=%s", email, ip_hash[:8])
+        self._json(200, {"message": "Subscribed! Check your inbox."})
+
     def _handle_register(self):
         try:
             body = self._read_body()
