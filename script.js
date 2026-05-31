@@ -4232,15 +4232,52 @@
 
         // Pull live articles from /api/feed; fall back to a static seed list
         // if the endpoint is unreachable (preserves the widget on any error).
-        renderTrack(FALLBACK_NEWS);
-        fetch(apiUrl('/api/feed'))
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (data) {
-                if (!data || !Array.isArray(data.articles) || !data.articles.length) return;
-                renderTrack(data.articles.slice(0, 10));
-                offset = 0;
-            })
-            .catch(function () { /* keep fallback */ });
+        // Cap at 15 items and cache for 3 days so the rail doesn't re-flicker
+        // on every navigation and so we don't slam /api/feed when the user
+        // bounces between pages.
+        var LIVE_RAIL_CAP = 15;
+        var LIVE_RAIL_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+        var LIVE_RAIL_CACHE_KEY = 'alexpavsky_live_rail_v1';
+
+        function readLiveRailCache() {
+            try {
+                var raw = localStorage.getItem(LIVE_RAIL_CACHE_KEY);
+                if (!raw) return null;
+                var parsed = JSON.parse(raw);
+                if (!parsed || !Array.isArray(parsed.items) || !parsed.items.length) return null;
+                if (Date.now() - (parsed.ts || 0) > LIVE_RAIL_TTL_MS) return null;
+                return parsed.items;
+            } catch (e) { return null; }
+        }
+        function writeLiveRailCache(items) {
+            try {
+                localStorage.setItem(LIVE_RAIL_CACHE_KEY, JSON.stringify({
+                    ts: Date.now(), items: items
+                }));
+            } catch (e) { /* quota or private mode — ignore */ }
+        }
+
+        var cached = readLiveRailCache();
+        if (cached && cached.length) {
+            renderTrack(cached.slice(0, LIVE_RAIL_CAP));
+        } else {
+            renderTrack(FALLBACK_NEWS);
+        }
+
+        // Only hit /api/feed if cache is stale or missing. Avoids the
+        // "flicker the rail on every page load" behavior the owner flagged.
+        if (!cached) {
+            fetch(apiUrl('/api/feed'))
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data || !Array.isArray(data.articles) || !data.articles.length) return;
+                    var fresh = data.articles.slice(0, LIVE_RAIL_CAP);
+                    renderTrack(fresh);
+                    writeLiveRailCache(fresh);
+                    offset = 0;
+                })
+                .catch(function () { /* keep fallback */ });
+        }
     })();
 
 })();

@@ -3620,6 +3620,143 @@ class Handler(SimpleHTTPRequestHandler):
         Handler._challenge_rate[ip_hash] = (entry[0] + 1, entry[1])
         return True
 
+    # ─────────────────────────────────────────────────────────────────
+    # /api/auth/* — register / login / logout
+    # Frontend stores the returned token in localStorage and sends it on
+    # subsequent calls via `Authorization: Bearer <token>` (matches
+    # _get_token() above). On register/login success the response shape
+    # is {"user": <_public_user_payload>, "token": "<opaque>"} so the
+    # nav can immediately swap the Login button for the user's name.
+    # ─────────────────────────────────────────────────────────────────
+    _AUTH_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+    @staticmethod
+    def _validate_register_payload(body):
+        """Return (name, email, password) on success or (None, None, error_str)."""
+        name = (body.get("name") or "").strip()[:80]
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        if not name:
+            return None, None, "name_required"
+        if not email or not Handler._AUTH_EMAIL_RE.match(email) or len(email) > 200:
+            return None, None, "invalid_email"
+        if not isinstance(password, str) or len(password) < 6 or len(password) > 200:
+            return None, None, "password_too_short"
+        return name, email, password
+
+    def _issue_session(self, user_id):
+        token = secrets.token_urlsafe(32)
+        conn = _db()
+        try:
+            conn.execute(
+                "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
+                (token, user_id, time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return token
+
+    def _handle_register(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+
+        ip_hash = _hash_ip(self._client_ip())
+        if not _check_auth_rate(ip_hash, "register"):
+            self._json(429, {"error": "rate_limit", "message": "Too many attempts. Try again later."})
+            return
+
+        name, email, password_or_err = Handler._validate_register_payload(body)
+        if name is None:
+            self._json(400, {"error": password_or_err})
+            return
+        password = password_or_err
+
+        # Uniqueness check. We do not leak whether the email exists when
+        # the lookup races a parallel insert — that race is harmless and
+        # the unique constraint catches it deterministically.
+        conn = _db()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM users WHERE LOWER(email) = ?", (email,)
+            ).fetchone()
+            if existing:
+                conn.close()
+                self._json(409, {"error": "email_in_use"})
+                return
+
+            user_id = secrets.token_urlsafe(16)
+            try:
+                conn.execute(
+                    "INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, name, email, _hash_pw(password), time.time()),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                # Lost the race against another insert — surface as email_in_use.
+                conn.close()
+                self._json(409, {"error": "email_in_use"})
+                return
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        token = self._issue_session(user_id)
+        user = _get_user_by_token(token)
+        log.info("auth.register: user=%s email=%s ip=%s", user_id, email, ip_hash[:8])
+        self._json(201, {"user": _public_user_payload(user), "token": token})
+
+    def _handle_login(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+
+        ip_hash = _hash_ip(self._client_ip())
+        if not _check_auth_rate(ip_hash, "login"):
+            self._json(429, {"error": "rate_limit", "message": "Too many attempts. Try again later."})
+            return
+
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        if not email or not isinstance(password, str) or not password:
+            self._json(400, {"error": "missing_credentials"})
+            return
+
+        conn = _db()
+        row = conn.execute(
+            "SELECT id, password_hash FROM users WHERE LOWER(email) = ?",
+            (email,),
+        ).fetchone()
+        conn.close()
+
+        if not row or not _verify_pw(password, row["password_hash"]):
+            # Generic message — do not leak which side failed.
+            self._json(401, {"error": "invalid_credentials"})
+            return
+
+        token = self._issue_session(row["id"])
+        user = _get_user_by_token(token)
+        log.info("auth.login: user=%s email=%s ip=%s", row["id"], email, ip_hash[:8])
+        self._json(200, {"user": _public_user_payload(user), "token": token})
+
+    def _handle_logout(self):
+        token = self._get_token()
+        if token:
+            conn = _db()
+            try:
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                conn.commit()
+            finally:
+                conn.close()
+        self._json(200, {"ok": True})
+
     def _handle_challenge(self):
         try:
             length = int(self.headers.get("Content-Length", "0"))
