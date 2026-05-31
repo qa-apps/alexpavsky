@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alex Pavsky — AI & QA Lab</title>
-    <meta name="description" content="Personal tech hub: AI testing, QA automation, curated news feed, and tools.">
+    <title>Alex Pavlovsky — AI & QA Lab</title>
+    <meta name="description" content="Personal tech hub by Alex Pavlovsky: AI testing, QA automation, curated news feed, and tools.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23g)'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='48' fill='white'%3E%3E_%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20260518-live-rail-4">
+    <link rel="stylesheet" href="style.css?v=20260530-article-modal-fallback-6">
 </head>
 <body>
 
@@ -28,6 +28,7 @@
             </div>
             <div class="article-modal-body">
                 <div class="article-modal-loading" id="article-modal-loading"><div class="article-modal-spinner"></div><span>Loading article…</span></div>
+                <div class="article-modal-reader" id="article-modal-reader"></div>
                 <iframe class="article-modal-iframe" id="article-modal-iframe" frameborder="0" scrolling="yes" title="Article preview"></iframe>
             </div>
             <div class="article-modal-actions">
@@ -57,7 +58,7 @@
         <div class="nav-inner">
             <a href="#" class="nav-brand">
                 <span class="brand-icon"><i class="fas fa-terminal"></i></span>
-                <span class="brand-text">alex<span class="brand-accent">pavsky</span></span>
+                <span class="brand-text">alex<span class="brand-accent">pavlovsky</span></span>
             </a>
             <div class="nav-links">
                 <a href="#feed" class="nav-link">Feed</a>
@@ -644,7 +645,7 @@
             <div class="footer-inner">
                 <div class="footer-brand">
                     <span class="brand-icon"><i class="fas fa-terminal"></i></span>
-                    <span class="brand-text">alex<span class="brand-accent">pavsky</span></span>
+                    <span class="brand-text">alex<span class="brand-accent">pavlovsky</span></span>
                 </div>
                 <p class="footer-text">Personal tech hub. Built with curiosity.</p>
                 <div id="digest">
@@ -665,10 +666,10 @@
                 <div class="footer-socials">
                     <a href="https://github.com/qa-apps" target="_blank" rel="noopener" class="social-icon" aria-label="GitHub"><i class="fab fa-github"></i></a>
                     <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon" aria-label="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
-                    <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon social-photo" aria-label="Alex Pavsky profile">
-                        <img src="assets/alex-profile.png" alt="Alex Pavsky">
+                    <a href="https://www.linkedin.com/in/qa-apps/" target="_blank" rel="noopener" class="social-icon social-photo" aria-label="Alex Pavlovsky profile">
+                        <img src="assets/alex-profile.png" alt="Alex Pavlovsky">
                     </a>
-                    <a href="mailto:alex.pavsky@gmail.com" class="social-icon" aria-label="Email"><i class="fas fa-envelope"></i></a>
+                    <a href="mailto:alex@alexpavsky.com" class="social-icon" aria-label="Email"><i class="fas fa-envelope"></i></a>
                 </div>
                 <p class="footer-copy-email">alex@alexpavsky.com</p>
             </div>
@@ -751,7 +752,7 @@
                             <ul>
                                 <li>This AI chat is offered for informational purposes only. It can be wrong, incomplete, out of date, biased, or unsuitable for your situation.</li>
                                 <li>You must independently verify all output before relying on it for business, legal, medical, technical, financial, or operational decisions.</li>
-                                <li>Alex Pavsky does not guarantee accuracy, merchantability, fitness for a particular purpose, or uninterrupted operation.</li>
+                                <li>Alex Pavlovsky does not guarantee accuracy, merchantability, fitness for a particular purpose, or uninterrupted operation.</li>
                             </ul>
                         </div>
                         <div class="chat-terms-section">
@@ -785,7 +786,7 @@
                             <h5>5. Liability and warranties</h5>
                             <ul>
                                 <li>To the fullest extent permitted by applicable law, the AI chat is provided on an "as is" and "as available" basis without warranties of any kind.</li>
-                                <li>Alex Pavsky disclaims liability for losses arising from use of, inability to use, or reliance on AI outputs, including indirect, incidental, special, consequential, or financial losses.</li>
+                                <li>Alex Pavlovsky disclaims liability for losses arising from use of, inability to use, or reliance on AI outputs, including indirect, incidental, special, consequential, or financial losses.</li>
                             </ul>
                         </div>
                         <div class="chat-terms-section">
@@ -1104,6 +1105,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260518-live-rail-4"></script>
+    <script src="script.js?v=20260530-article-modal-fallback-6"></script>
 </body>
 </html>

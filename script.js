@@ -79,19 +79,13 @@
             date: '2026-03-28T11:00:00Z'
         }
     ];
+    // Fallback list shown when /api/youtube is unreachable or empty.
+    // Every entry MUST have a real, currently-resolvable video id —
+    // otherwise the thumbnail 404s and the carousel renders as black
+    // squares (caught by tests/contentQuality.spec.ts). Removed entries
+    // (OpenAI 9H0LwTqJwWk, Two Minute Papers fE3S2vM2vQ8, MKBHD
+    // Q9pI0v1D44A) had dead ids — re-add with verified ids when needed.
     const YOUTUBE_FALLBACK_VIDEOS = [
-        {
-            source: 'OpenAI',
-            title: 'OpenAI channel',
-            link: 'https://www.youtube.com/watch?v=9H0LwTqJwWk',
-            date: '2026-04-01T12:00:00Z'
-        },
-        {
-            source: 'Two Minute Papers',
-            title: 'Two Minute Papers latest research roundup',
-            link: 'https://www.youtube.com/watch?v=fE3S2vM2vQ8',
-            date: '2026-03-30T12:00:00Z'
-        },
         {
             source: 'Fireship',
             title: 'Fireship rapid tech briefing',
@@ -103,12 +97,6 @@
             title: 'Lex Fridman AI conversation highlight',
             link: 'https://www.youtube.com/watch?v=7xTGNNLPyMI',
             date: '2026-03-24T12:00:00Z'
-        },
-        {
-            source: 'MKBHD',
-            title: 'MKBHD future tech and devices breakdown',
-            link: 'https://www.youtube.com/watch?v=Q9pI0v1D44A',
-            date: '2026-03-22T12:00:00Z'
         },
         {
             source: '3Blue1Brown',
@@ -617,6 +605,23 @@
         return tmp.textContent || tmp.innerText || '';
     }
 
+    function isBlockedPreviewArticle(article) {
+        var link = (article && article.link) || '';
+        try {
+            var host = new URL(link, window.location.href).hostname.toLowerCase();
+            if (host === 'pub.towardsai.net' || host === 'towardsai.net' || host.endsWith('.towardsai.net')) {
+                return true;
+            }
+        } catch (e) {}
+        return /towards\s*ai/i.test((article && article.source) || '') || /towardsai|pub\.towardsai/i.test(link);
+    }
+
+    function filterPreviewableFeedArticles(articles) {
+        return (articles || []).filter(function (article) {
+            return article && !isBlockedPreviewArticle(article);
+        });
+    }
+
     function renderArticle(article) {
         var card = document.createElement('a');
         card.className = 'feed-card';
@@ -692,18 +697,19 @@
         setupFeedCarouselMotion();
     }
 
-    var FEED_STORAGE_KEY = 'alexpavsky_feed_cache_v2';
+    var FEED_STORAGE_KEY = 'alexpavsky_feed_cache_v3';
 
     function saveFeedToStorage(articles) {
         try {
-            localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify({ ts: Date.now(), articles: articles.slice(0, 30) }));
+            localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify({ ts: Date.now(), articles: filterPreviewableFeedArticles(articles).slice(0, 30) }));
+            localStorage.removeItem('alexpavsky_feed_cache_v2');
         } catch (e) {}
     }
 
     function loadFeedFromStorage() {
         try {
             var data = JSON.parse(localStorage.getItem(FEED_STORAGE_KEY));
-            if (data && data.articles && Date.now() - data.ts < 3600000) return data.articles;
+            if (data && data.articles && Date.now() - data.ts < 3600000) return filterPreviewableFeedArticles(data.articles);
         } catch (e) {}
         return [];
     }
@@ -743,7 +749,7 @@
             articles = FEED_FALLBACK_ARTICLES.slice();
         }
 
-        articles = sortFeedByDate(articles).filter(isRecentFeedArticle);
+        articles = sortFeedByDate(filterPreviewableFeedArticles(articles)).filter(isRecentFeedArticle);
 
         if (articles.length > 0) {
             saveFeedToStorage(articles);
@@ -838,29 +844,141 @@
         if (heroEl) heroEl.style.backgroundImage = '';
         // Load iframe with reader-mode content served from our own server
         var iframeEl = document.getElementById('article-modal-iframe');
+        var readerEl = document.getElementById('article-modal-reader');
         var loadingEl = document.getElementById('article-modal-loading');
         var viewToggle = document.getElementById('article-modal-view-toggle');
-        function loadIframeView(view) {
-            if (!iframeEl) return;
-            iframeEl.classList.remove('loaded');
-            if (loadingEl) loadingEl.style.display = 'flex';
-            iframeEl.onload = function () {
-                iframeEl.classList.add('loaded');
-                if (loadingEl) loadingEl.style.display = 'none';
-            };
-            if (view === 'full') {
-                iframeEl.removeAttribute('sandbox');
-                iframeEl.src = apiUrl('/api/article-embed?url=' + encodeURIComponent(fetchUrl));
-            } else {
-                iframeEl.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
-                var theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
-                iframeEl.src = apiUrl('/api/article-page?url=' + encodeURIComponent(fetchUrl) + '&theme=' + theme);
-            }
+        var iframeLoadTimer = null;
+        var iframeRequestId = 0;
+        function fallbackIframeDoc(reason) {
+            var plainDesc = stripHtml(desc || '');
+            if (!plainDesc) plainDesc = 'Open the original article for the full version.';
+            if (plainDesc.length > 600) plainDesc = plainDesc.slice(0, 597) + '...';
+            var theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
+            var bg = theme === 'light' ? '#fafbff' : '#0b1020';
+            var fg = theme === 'light' ? '#0f172a' : '#e7e9ff';
+            var card = theme === 'light' ? '#ffffff' : '#111827';
+            var muted = theme === 'light' ? '#475569' : '#a8b3cf';
+            var note = reason || 'Full reader preview is unavailable for this publisher. Showing the RSS preview.';
+            return '<!doctype html><html><head><meta charset="utf-8"><style>' +
+                'body{margin:0;padding:32px;background:' + bg + ';color:' + fg + ';font:16px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif}' +
+                '.wrap{max-width:760px;margin:0 auto;background:' + card + ';border:1px solid rgba(127,127,127,.18);border-radius:12px;padding:24px}' +
+                '.kicker{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:' + muted + ';font-weight:700}' +
+                'h1{font-size:28px;line-height:1.2;margin:10px 0 14px}.reason{color:' + muted + ';font-size:13px;margin-top:18px}' +
+                'a.btn{display:inline-flex;margin-top:18px;padding:10px 14px;border-radius:8px;background:#7c3aed;color:white;text-decoration:none;font-weight:700}' +
+                '</style></head><body><main class="wrap">' +
+                '<div class="kicker">' + escapeHtml(source || 'Article preview') + '</div>' +
+                '<h1>' + escapeHtml(title || 'Article preview unavailable') + '</h1>' +
+                '<p>' + escapeHtml(plainDesc) + '</p>' +
+                '<a class="btn" href="' + escapeHtml(displayUrl) + '" target="_blank" rel="noopener">Open full article</a>' +
+                '<p class="reason">' + escapeHtml(note) + '</p>' +
+                '</main></body></html>';
         }
-        // Default to Full page (live site with design + images). User can toggle to Reader.
+        function loadIframeView(view) {
+            if (!iframeEl && !readerEl) return;
+            iframeRequestId += 1;
+            var requestId = iframeRequestId;
+            var completed = false;
+            if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
+            if (iframeEl) {
+                iframeEl.classList.remove('loaded');
+                iframeEl.removeAttribute('src');
+                iframeEl.srcdoc = '';
+                iframeEl.style.display = readerEl ? 'none' : 'block';
+            }
+            if (readerEl) {
+                readerEl.classList.remove('loaded');
+                readerEl.innerHTML = '';
+            }
+            if (loadingEl) loadingEl.style.display = 'flex';
+            function htmlToArticleBody(html) {
+                var parsed = new DOMParser().parseFromString(html, 'text/html');
+                return parsed.body ? parsed.body.innerHTML : html;
+            }
+            function showDoc(html) {
+                if (requestId !== iframeRequestId || completed) return;
+                completed = true;
+                if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
+                if (readerEl) {
+                    readerEl.innerHTML = htmlToArticleBody(html);
+                    readerEl.querySelectorAll('img').forEach(function (img) {
+                        function showOrRemove() {
+                            if (!img.isConnected) return;
+                            if (img.complete && img.naturalWidth > 0) {
+                                img.classList.add('reader-image-loaded');
+                                return;
+                            }
+                            if (img.complete && img.naturalWidth === 0 && img.naturalHeight === 0) {
+                                img.remove();
+                            }
+                        }
+                        img.addEventListener('load', showOrRemove);
+                        img.addEventListener('error', function () { img.remove(); });
+                        showOrRemove();
+                        [1500, 3000, 6000].forEach(function (delay) {
+                            setTimeout(showOrRemove, delay);
+                        });
+                    });
+                    readerEl.classList.add('loaded');
+                } else if (iframeEl) {
+                    iframeEl.srcdoc = html;
+                    iframeEl.classList.add('loaded');
+                }
+                if (loadingEl) loadingEl.style.display = 'none';
+            }
+            function showFallback(reason) {
+                if (requestId !== iframeRequestId || completed) return;
+                completed = true;
+                if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
+                var fallbackDoc = fallbackIframeDoc(reason || 'Full reader preview is unavailable for this publisher. Showing the RSS preview.');
+                if (readerEl) {
+                    readerEl.innerHTML = htmlToArticleBody(fallbackDoc);
+                    readerEl.classList.add('loaded');
+                } else if (iframeEl) {
+                    iframeEl.srcdoc = fallbackDoc;
+                    iframeEl.classList.add('loaded');
+                }
+                if (loadingEl) loadingEl.style.display = 'none';
+            }
+            var controller = window.AbortController ? new AbortController() : null;
+            iframeLoadTimer = setTimeout(function () {
+                if (controller) controller.abort();
+                showFallback('Full reader preview took too long. Showing the RSS preview.');
+            }, 9000);
+            if (iframeEl) iframeEl.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+            var requestUrl;
+            if (view === 'full') {
+                requestUrl = apiUrl('/api/article-embed?url=' + encodeURIComponent(fetchUrl));
+            } else {
+                var theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
+                requestUrl = apiUrl('/api/article-page?url=' + encodeURIComponent(fetchUrl) + '&theme=' + theme);
+            }
+            fetch(requestUrl, controller ? { signal: controller.signal } : {})
+                .then(function (response) {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.text();
+                })
+                .then(function (html) {
+                    if (!html || html.trim().length < 80) throw new Error('empty article preview');
+                    if (/Article preview unavailable|We couldn't fetch this article/i.test(html)) {
+                        throw new Error('source blocked article preview');
+                    }
+                    showDoc(html);
+                })
+                .catch(function (err) {
+                    if (completed) return;
+                    var message = 'Full reader preview is unavailable for this publisher. Showing the RSS preview.';
+                    if (err && err.name === 'AbortError') {
+                        message = 'Full reader preview took too long. Showing the RSS preview.';
+                    } else if (err && /source blocked/i.test(err.message || '')) {
+                        message = 'This publisher blocks embedded reader previews. Showing the RSS preview.';
+                    }
+                    showFallback(message);
+                });
+        }
+        // Default to Reader so sources that block cross-origin embeds still show content.
         if (viewToggle) {
             var btns = viewToggle.querySelectorAll('.article-modal-view-btn');
-            btns.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === 'full'); });
+            btns.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === 'reader'); });
             btns.forEach(function (b) {
                 b.onclick = function () {
                     btns.forEach(function (x) { x.classList.remove('active'); });
@@ -869,7 +987,7 @@
                 };
             });
         }
-        loadIframeView('full');
+        loadIframeView('reader');
         // Also fetch OG image for hero background
         fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(fetchUrl)))
             .then(function (r) { return r.ok ? r.json() : null; })

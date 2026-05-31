@@ -1075,6 +1075,71 @@ img { max-width: 100%; display: block; }
 .article-modal-iframe.loaded {
     opacity: 1;
 }
+.article-modal-reader {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    padding: 24px 28px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    color: #e7e9ff;
+    background: #0b1020;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+}
+.article-modal-reader.loaded {
+    opacity: 1;
+}
+.article-modal-reader > * {
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.article-modal-reader h1,
+.article-modal-reader h2,
+.article-modal-reader h3,
+.article-modal-reader h4 {
+    line-height: 1.25;
+}
+.article-modal-reader h1 {
+    font-size: 1.9rem;
+    margin-top: 0.65rem;
+}
+.article-modal-reader a {
+    color: #7dd3fc;
+}
+.article-modal-reader img,
+.article-modal-reader video {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+.article-modal-reader img {
+    opacity: 0;
+}
+.article-modal-reader img.reader-image-loaded {
+    opacity: 1;
+}
+.article-modal-reader pre,
+.article-modal-reader code {
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+.article-modal-reader pre {
+    background: rgba(127,127,127,0.12);
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+}
+.article-modal-reader blockquote {
+    border-left: 3px solid #7dd3fc;
+    padding-left: 14px;
+    color: rgba(220,225,245,0.78);
+    margin: 18px auto;
+}
+.article-modal-source-banner {
+    font-size: 12px;
+    opacity: 0.65;
+    margin-bottom: 14px;
+}
 .article-modal-loading {
     position: absolute;
     inset: 0;
@@ -1183,6 +1248,9 @@ body.light-mode .article-modal-desc { color: #5a5a68; }
 body.light-mode .article-modal-actions { background: rgba(0,0,0,0.03); border-top-color: rgba(0,0,0,0.06); }
 body.light-mode .article-modal-close { background: rgba(255,255,255,0.7); color: #2a2a35; border-color: rgba(0,0,0,0.1); }
 body.light-mode .article-modal-date { color: #8a8a95; }
+body.light-mode .article-modal-reader { background: #fafbff; color: #0f172a; }
+body.light-mode .article-modal-reader a { color: #0369a1; }
+body.light-mode .article-modal-reader blockquote { color: rgba(15,23,42,0.7); border-left-color: #0369a1; }
 
 /* ─── YouTube Video Modal ─── */
 .yt-modal-overlay {
@@ -1676,11 +1744,16 @@ body.light-mode .article-modal-date { color: #8a8a95; }
     transform: translateY(-50%) scale(1.1);
     box-shadow: 0 6px 28px rgba(99,102,241,0.35);
 }
-.feed-carousel-btn-left  { left: 0; }
-.feed-carousel-btn-right { right: 0; }
+/* LIVE rail handle sits at fixed left:0, width:40px. Push carousel arrows
+   inward so they don't overlap card text and don't sit behind the handle. */
+.feed-carousel-btn-left  { left: 56px; }
+.feed-carousel-btn-right { right: 16px; }
 @media (max-width: 900px) {
-    .feed-carousel-btn-left  { left: 0; }
-    .feed-carousel-btn-right { right: 0; }
+    .feed-carousel-btn-left  { left: 48px; }
+    .feed-carousel-btn-right { right: 8px; }
+}
+@media (max-width: 540px) {
+    .feed-carousel-btn-left  { left: 44px; }
 }
 
 
@@ -2804,6 +2877,13 @@ body.light-mode .challenge-verdict-card.verdict-safe { background: rgba(16,185,1
     .verdict-metrics { flex-direction: column; gap: 0.75rem; }
 }
 
+/* Phone-only safe-area below page content so the floating chatbot toggle
+   button (bottom-right ~80x80 px) doesn't cover the last row of CTAs
+   (e.g. "Run Analysis" on the RAG card, footer email link). */
+@media (max-width: 768px) {
+    main, footer { padding-bottom: max(env(safe-area-inset-bottom), 96px); }
+}
+
 
 /* ─── Footer ─── */
 .footer {
@@ -3657,6 +3737,13 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-teaser-close:hover { color: var(--text-primary); }
 .chat-teaser.hidden { display: none; }
 
+/* On narrow screens the teaser bubble was sitting on top of primary CTAs
+   (Live Feed / AI Lab hero buttons, Run Analysis on RAG card). Hide it on
+   phones — the chat-toggle button alone is enough discoverability there. */
+@media (max-width: 768px) {
+    .chat-teaser { display: none !important; }
+}
+
 .chat-window {
     position: absolute; bottom: 72px; right: 0; width: 380px; height: 520px;
     background: var(--bg-secondary); border: 1px solid var(--border);
@@ -4345,7 +4432,11 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ─── LIVE Rail: floating left-edge pill + slide-out news drawer ───────── */
 .live-rail {
-    position: fixed; top: 140px; left: 0; transform: none;
+    /* Anchored under the navbar (which sits at top 0–60px). Moving from
+       top:140px to top:84px tucks the LIVE handle into the same vertical
+       band as the page background, BELOW the hero headline area, so it
+       stops overlapping content on desktop and mobile hero. */
+    position: fixed; top: 84px; left: 0; transform: none;
     z-index: 9999; display: flex; align-items: center;
     pointer-events: none;
     --live-c: #ef4444;
@@ -4422,6 +4513,12 @@ body.light-mode .live-rail {
 .live-rail.open .live-drawer { width: 380px; pointer-events: auto; }
 .live-rail.open .live-handle { transform: translateX(380px); }
 @media (max-width: 540px) {
+    /* Smaller, less intrusive handle on mobile so the hero headline isn't
+       partially covered. */
+    .live-rail { top: 70px; }
+    .live-handle { width: 28px; height: 84px; }
+    .live-handle:hover { width: 32px; }
+    .live-handle .live-vlabel { font-size: 9px; letter-spacing: 1.6px; }
     .live-rail.open .live-drawer { width: 92vw; max-width: 380px; }
     .live-rail.open .live-handle { transform: translateX(min(92vw, 380px)); }
 }
