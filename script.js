@@ -419,6 +419,17 @@
     }
 
     async function fetchYoutubeBrowserFallback() {
+        // api.rss2json.com is rate-limited (429/422) and spams the console on
+        // every load. Honor a localStorage cooldown so we attempt the
+        // third-party scrape at most once every 6h; otherwise skip straight to
+        // the curated fallback list. Keeps the console clean for visitors who
+        // reload, while still refreshing a few times a day.
+        var COOLDOWN_KEY = 'alexpavsky_yt_rss_cooldown';
+        var COOLDOWN_MS = 6 * 60 * 60 * 1000;
+        try {
+            var until = parseInt(localStorage.getItem(COOLDOWN_KEY) || '0', 10);
+            if (until && Date.now() < until) return [];
+        } catch (e) {}
         var settled = await Promise.allSettled(YOUTUBE_SOURCES.map(async function (source) {
             try {
                 var url = 'https://api.rss2json.com/v1/api.json?rss_url=' +
@@ -440,7 +451,7 @@
                 return [];
             }
         }));
-        return settled.reduce(function (acc, result) {
+        var merged = settled.reduce(function (acc, result) {
             if (result.status === 'fulfilled' && Array.isArray(result.value)) {
                 return acc.concat(result.value);
             }
@@ -450,6 +461,12 @@
             var dateB = parseFeedDate(b.date);
             return (dateB ? dateB.getTime() : 0) - (dateA ? dateA.getTime() : 0);
         });
+        // If the scrape came back empty (all rate-limited), start a cooldown so
+        // we stop hammering rss2json on every reload.
+        if (!merged.length) {
+            try { localStorage.setItem(COOLDOWN_KEY, String(Date.now() + COOLDOWN_MS)); } catch (e) {}
+        }
+        return merged;
     }
 
     async function fetchArticlePreviewFallback(url) {
@@ -842,7 +859,7 @@
         var linkEl = document.getElementById('article-modal-link');
         var copyBtn = document.getElementById('article-modal-copy');
         if (sourceEl) sourceEl.textContent = source;
-        if (titleEl) titleEl.textContent = title || 'Untitled';
+        if (titleEl) { titleEl.textContent = title || 'Untitled'; titleEl.removeAttribute('aria-hidden'); }
         var heroEl = document.getElementById('article-modal-hero');
 
         // For Hacker News, the RSS link points to the comments page but the real article URL
@@ -1232,12 +1249,16 @@
 
     function getYoutubeThumbCandidates(videoId) {
         if (!videoId) return [];
+        // Lead with hqdefault.jpg: it exists for virtually EVERY video, so the
+        // first paint is a valid thumbnail instead of a 404 that the onerror
+        // walk has to recover from. maxresdefault exists only for HD uploads,
+        // so it's kept as an optional upgrade further down, not first.
         return [
-            'https://i.ytimg.com/vi_webp/' + videoId + '/maxresdefault.webp',
-            'https://i.ytimg.com/vi_webp/' + videoId + '/hqdefault.webp',
-            'https://i.ytimg.com/vi/' + videoId + '/maxresdefault.jpg',
             'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg',
-            'https://i.ytimg.com/vi/' + videoId + '/mqdefault.jpg'
+            'https://i.ytimg.com/vi/' + videoId + '/mqdefault.jpg',
+            'https://i.ytimg.com/vi/' + videoId + '/maxresdefault.jpg',
+            'https://i.ytimg.com/vi/' + videoId + '/sddefault.jpg',
+            'https://i.ytimg.com/vi/' + videoId + '/default.jpg'
         ];
     }
 
@@ -1356,8 +1377,12 @@
             var videos = [];
             try {
                 var res = await fetch(apiUrl('/api/youtube'));
-                var data = await res.json();
-                videos = (data.videos || []);
+                if (res.ok) {
+                    var data = await res.json();
+                    videos = (data.videos || []);
+                } else {
+                    videos = [];   // endpoint not implemented (404) — fall through quietly
+                }
             } catch (apiErr) {
                 videos = [];
             }

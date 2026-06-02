@@ -102,16 +102,27 @@ body.light-mode .chat-input::placeholder { color: #8a8a95; }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+/* overflow-x: clip on <html> stops a wide marquee/track (LIVE ticker, rail)
+   from inflating documentElement.scrollWidth on tablet/phone widths. body's
+   overflow-x:hidden alone prevents user scrolling but some engines still
+   report the inflated scrollWidth; clip on the root keeps scrollWidth ==
+   clientWidth so naive overflow checks pass too. */
+html { scroll-behavior: smooth; scroll-padding-top: 80px; overflow-x: clip; max-width: 100%; }
 
 body {
     font-family: var(--font);
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
-    overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100%;
     -webkit-font-smoothing: antialiased;
 }
+
+/* Belt-and-suspenders: the duplicated marquee tracks must never report
+   intrinsic width to the document. Their visible clipping is handled by
+   their own overflow:hidden parents; this caps their layout width. */
+.ticker-content, #liveTrack, .live-viewport { max-width: 100vw; }
 
 /* Subtle cosmic stars */
 body::after {
