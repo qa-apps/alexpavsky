@@ -9,7 +9,36 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23g)'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='48' fill='white'%3E%3E_%3C/text%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon.ico">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Alex Pavlovsky — AI & QA Lab",
+      "url": "https://www.alexpavsky.com",
+      "description": "Personal tech hub by Alex Pavlovsky: AI testing, QA automation, curated news feed, and tools.",
+      "publisher": {
+        "@type": "Person",
+        "name": "Alex Pavlovsky",
+        "image": "https://www.alexpavsky.com/assets/alex-profile.png",
+        "url": "https://www.alexpavsky.com",
+        "sameAs": [
+          "https://www.linkedin.com/in/qa-apps/",
+          "https://github.com/qa-apps"
+        ],
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://www.alexpavsky.com/favicon-512.png",
+          "width": 512,
+          "height": 512
+        }
+      }
+    }
+    </script>
     <link rel="stylesheet" href="style.css?v=20260602-e2e-fixes">
 </head>
 <body>
@@ -640,7 +669,7 @@
             </div>
         </div>
     </div>
-    <footer class="footer">
+    <footer class="footer" id="digest">
         <div class="container">
             <div class="footer-inner">
                 <div class="footer-brand">
@@ -648,7 +677,7 @@
                     <span class="brand-text">alex<span class="brand-accent">pavlovsky</span></span>
                 </div>
                 <p class="footer-text">Personal tech hub. Built with curiosity.</p>
-                <div id="digest">
+                <div class="newsletter-wrap">
                     <form class="newsletter-form" id="newsletter-form">
                         <p class="newsletter-label"><i class="fas fa-paper-plane"></i> Daily AI, QA &amp; Agent Automation Digest</p>
                         <div class="newsletter-input-wrap">
