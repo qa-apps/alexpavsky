@@ -157,12 +157,15 @@ img { max-width: 100%; display: block; }
 
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
 
-.yt-section .container { max-width: 1360px; }
+/* YouTube carousel: match the 1400px content width of the sections below
+   (kept as a class selector so the mobile max-width:100% override still wins). */
+.yt-section .container { max-width: 1400px; }
 
 #feed > .container,
 #explore > .container,
 #tools > .container,
-#lab > .container {
+#lab > .container,
+.ticker-wrapper > .container {
     max-width: 1400px;
 }
 
