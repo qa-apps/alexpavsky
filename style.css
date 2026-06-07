@@ -1913,7 +1913,10 @@ body.light-mode .article-modal-reader blockquote { color: rgba(15,23,42,0.7); bo
 /* ─── Explore ─── */
 .explore-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    /* 5 cards, like .lab-grid: a fixed column count that shrinks to stay on one
+       line as the viewport narrows, instead of auto-fill wrapping the 5th card to
+       a second row. minmax(0,1fr) lets the tracks shrink below content width. */
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 1.5rem;
 }
 
