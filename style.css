@@ -2900,7 +2900,15 @@ body.light-mode .challenge-verdict-card.verdict-safe { background: rgba(16,185,1
 .footer {
     padding: 1.5rem 0;
     border-top: 1px solid var(--border);
-    scroll-margin-top: 80px; /* match sticky-header height so #digest anchor lands correctly */
+    /* #digest is the last section on the page, so it has no content below it to
+       scroll up into view. Give it a full viewport of height (minus the 80px sticky
+       header) so the global html{scroll-padding-top:80px} can land it like every
+       other section anchor, and center the content so the extra height reads as an
+       intentional panel instead of an empty gap. */
+    min-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .footer-inner {
