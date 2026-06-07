@@ -1615,14 +1615,8 @@ body.light-mode .article-modal-reader blockquote { color: rgba(15,23,42,0.7); bo
     .yt-carousel-frame::before,
     .yt-carousel-frame::after { width: 40px; }
 
-    /* ─── Mobile: tools strip stacks into single column (text was clipped in 4-col layout) ─── */
-    .tools-strip-grid { grid-template-columns: 1fr; gap: 0.75rem; }
-    .tool-strip-card { padding: 1rem 1.1rem; min-height: auto; flex-direction: row; align-items: center; gap: 0.85rem; }
-    .tool-strip-icon { width: 40px; height: 40px; font-size: 1.1rem; flex-shrink: 0; }
-    .tool-strip-info { flex: 1; min-width: 0; }
-    .tool-strip-name { font-size: 0.92rem; white-space: normal; }
-    .tool-strip-desc { font-size: 0.78rem; -webkit-line-clamp: 2; line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
-    .tool-strip-arrow { font-size: 0.78rem; flex-shrink: 0; white-space: nowrap; }
+    /* Tighter gap on small screens; column count is set by the 900/640 steps below. */
+    .tools-strip-grid { gap: 0.75rem; }
 
     /* ─── Mobile: hero stacks, terminal mockup hidden (was bleeding off-screen) ─── */
     .hero { padding: 5rem 1rem 0; min-height: auto; }
@@ -4224,6 +4218,13 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
     .terminal-card { width: 100%; max-width: 420px; }
 
     .diff-inputs { grid-template-columns: 1fr; }
+
+    /* Tablet: step the card grids down a level so cards aren't cramped on one
+       line (avoids the abrupt jump straight to a single column). */
+    .tools-strip-grid { grid-template-columns: repeat(2, 1fr); }
+    .explore-grid { grid-template-columns: repeat(3, 1fr); }
+    .tools-grid { grid-template-columns: repeat(4, 1fr); }
+    .lab-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 640px) {
@@ -4233,10 +4234,19 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
     .hero-stats { flex-direction: column; gap: 0.75rem; padding: 1rem; }
     .stat-divider { width: 40px; height: 1px; }
 
+    /* Phone: single column for every card grid — no orphaned last card. */
     .feed-grid { grid-template-columns: 1fr; }
-    .tools-grid { grid-template-columns: repeat(3, 1fr); }
+    .tools-strip-grid { grid-template-columns: 1fr; }
+    .tools-grid { grid-template-columns: 1fr; }
     .explore-grid { grid-template-columns: 1fr; }
-    .lab-grid { grid-template-columns: repeat(2, 1fr); }
+    .lab-grid { grid-template-columns: 1fr; }
+    /* compact horizontal tool-strip cards in the single-column phone layout */
+    .tool-strip-card { padding: 1rem 1.1rem; min-height: auto; flex-direction: row; align-items: center; gap: 0.85rem; }
+    .tool-strip-icon { width: 40px; height: 40px; font-size: 1.1rem; flex-shrink: 0; }
+    .tool-strip-info { flex: 1; min-width: 0; }
+    .tool-strip-name { font-size: 0.92rem; white-space: normal; }
+    .tool-strip-desc { font-size: 0.78rem; -webkit-line-clamp: 2; line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+    .tool-strip-arrow { font-size: 0.78rem; flex-shrink: 0; white-space: nowrap; }
 
     .chat-window { width: calc(100vw - 40px); right: -10px; }
     .chat-input { padding-right: 5.2rem; }
