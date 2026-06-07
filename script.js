@@ -111,6 +111,13 @@
             date: '2026-03-18T12:00:00Z'
         }
     ];
+    // Live YouTube sources are disabled: /api/youtube is not implemented on the
+    // backend (404) and the api.rss2json.com fallback is rate-limited (422/429).
+    // Both fail over to the curated list above, but each logs a failed network
+    // request to the console on every fresh load. Until a working live source
+    // exists, serve the curated list and make zero live requests so the console
+    // stays clean. Flip to true once /api/youtube returns real data.
+    const YOUTUBE_LIVE_FETCH_ENABLED = false;
 
     const FEED_MAX_AGE_DAYS = 30;
     const FEED_CARDS_PER_VIEW = 6;
@@ -1372,8 +1379,13 @@
 
     async function fetchYoutubeCarousel() {
         try {
-            console.log('[YT Carousel] Fetching...');
             renderYoutubeCarousel(YOUTUBE_FALLBACK_VIDEOS);
+            if (!YOUTUBE_LIVE_FETCH_ENABLED) {
+                // Curated list is already rendered above; skip the live requests
+                // that only 404/422 and spam the console. See the flag definition.
+                return;
+            }
+            console.log('[YT Carousel] Fetching...');
             var videos = [];
             try {
                 var res = await fetch(apiUrl('/api/youtube'));
