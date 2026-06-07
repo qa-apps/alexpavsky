@@ -1789,17 +1789,15 @@
             '</div>';
     }
 
-    // ─── Newsletter ───
-    var newsletterForm = document.getElementById('newsletter-form');
-    var newsletterEmail = document.getElementById('newsletter-email');
-    var newsletterMsg = document.getElementById('newsletter-msg');
-    if (newsletterForm) {
-        newsletterForm.addEventListener('submit', async function (e) {
+    // ─── Newsletter (footer form + Digest modal share one handler) ───
+    function wireSubscribeForm(form, emailEl, msgEl) {
+        if (!form || !emailEl || !msgEl) return;
+        form.addEventListener('submit', async function (e) {
             e.preventDefault();
-            var email = newsletterEmail.value.trim();
+            var email = emailEl.value.trim();
             if (!email) return;
-            newsletterMsg.textContent = '';
-            newsletterMsg.className = 'newsletter-msg';
+            msgEl.textContent = '';
+            msgEl.className = 'newsletter-msg';
             try {
                 var res = await fetch(apiUrl('/api/subscribe'), {
                     method: 'POST',
@@ -1808,19 +1806,61 @@
                 });
                 var data = await res.json();
                 if (res.ok) {
-                    newsletterMsg.textContent = data.message || 'Subscribed!';
-                    newsletterMsg.className = 'newsletter-msg success';
-                    newsletterEmail.value = '';
+                    msgEl.textContent = data.message || 'Subscribed!';
+                    msgEl.className = 'newsletter-msg success';
+                    emailEl.value = '';
                 } else {
-                    newsletterMsg.textContent = data.error || 'Something went wrong.';
-                    newsletterMsg.className = 'newsletter-msg error';
+                    msgEl.textContent = data.error || 'Something went wrong.';
+                    msgEl.className = 'newsletter-msg error';
                 }
             } catch (err) {
-                newsletterMsg.textContent = 'Network error. Try again.';
-                newsletterMsg.className = 'newsletter-msg error';
+                msgEl.textContent = 'Network error. Try again.';
+                msgEl.className = 'newsletter-msg error';
             }
         });
     }
+    wireSubscribeForm(
+        document.getElementById('newsletter-form'),
+        document.getElementById('newsletter-email'),
+        document.getElementById('newsletter-msg')
+    );
+    wireSubscribeForm(
+        document.getElementById('digest-modal-form'),
+        document.getElementById('digest-modal-email'),
+        document.getElementById('digest-modal-msg')
+    );
+
+    // ─── Digest / Subscribe Modal ───
+    // The "Digest" nav links open this modal instead of scrolling to the footer
+    // newsletter form. As the last block on the page that form could not land near
+    // the top of the viewport, which is what pushed an earlier fix to over-stretch
+    // the footer. A modal sidesteps that entirely and matches the Forum modal UX.
+    (function () {
+        var modal = document.getElementById('digest-modal');
+        if (!modal) return;
+        var overlay = document.getElementById('digest-modal-overlay');
+        var closeBtn = document.getElementById('digest-modal-close');
+        var emailEl = document.getElementById('digest-modal-email');
+        function openDigest(e) {
+            if (e) e.preventDefault();
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            if (emailEl) setTimeout(function () { try { emailEl.focus(); } catch (err) {} }, 60);
+        }
+        function closeDigest() {
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        if (overlay) overlay.addEventListener('click', closeDigest);
+        if (closeBtn) closeBtn.addEventListener('click', closeDigest);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) closeDigest();
+        });
+        // Desktop nav link + mobile menu link both use href="#digest"
+        document.querySelectorAll('a[href="#digest"]').forEach(function (link) {
+            link.addEventListener('click', openDigest);
+        });
+    })();
 
     // ─── Forum & Feedback ───
     (function () {

@@ -2900,15 +2900,6 @@ body.light-mode .challenge-verdict-card.verdict-safe { background: rgba(16,185,1
 .footer {
     padding: 1.5rem 0;
     border-top: 1px solid var(--border);
-    /* #digest is the last section on the page, so it has no content below it to
-       scroll up into view. Give it a full viewport of height (minus the 80px sticky
-       header) so the global html{scroll-padding-top:80px} can land it like every
-       other section anchor, and center the content so the extra height reads as an
-       intentional panel instead of an empty gap. */
-    min-height: calc(100vh - 80px);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
 }
 
 .footer-inner {
@@ -3080,6 +3071,11 @@ body.light-mode .forum-inline-reply textarea { background: rgba(0,0,0,0.03); }
 .newsletter-msg { font-size: 0.8rem; margin-top: 0.4rem; min-height: 1.2em; }
 .newsletter-msg.success { color: var(--success); }
 .newsletter-msg.error { color: var(--danger); }
+
+/* Digest / Subscribe modal (opened from the "Digest" nav link) */
+.digest-modal-content { width: min(92vw, 460px); }
+.digest-modal-intro { font-size: 0.9rem; line-height: 1.55; color: var(--text-secondary); margin: 0 0 1.25rem; text-align: center; }
+.digest-modal-intro strong { color: var(--text-primary); font-weight: 600; }
 
 .footer-socials {
     display: flex;

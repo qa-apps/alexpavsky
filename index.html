@@ -39,7 +39,7 @@
       }
     }
     </script>
-    <link rel="stylesheet" href="style.css?v=20260607-reduced-motion">
+    <link rel="stylesheet" href="style.css?v=20260607-digest-modal">
 </head>
 <body>
 
@@ -734,6 +734,27 @@
         </div>
     </div>
 
+    <!-- Digest / Subscribe Modal -->
+    <div class="diff-modal" id="digest-modal">
+        <div class="modal-overlay" id="digest-modal-overlay"></div>
+        <div class="modal-content digest-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-paper-plane"></i> Daily Digest</h3>
+                <button class="modal-close" id="digest-modal-close" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body digest-modal-body">
+                <p class="digest-modal-intro">Get the <strong>Daily AI, QA &amp; Agent Automation Digest</strong> — a short briefing on what's new in AI testing, agents, and quality engineering, straight to your inbox.</p>
+                <form class="newsletter-form" id="digest-modal-form">
+                    <div class="newsletter-input-wrap">
+                        <input type="email" id="digest-modal-email" placeholder="your@email.com" required>
+                        <button type="submit" class="btn btn-primary btn-sm" id="digest-modal-btn">Subscribe</button>
+                    </div>
+                    <p class="newsletter-msg" id="digest-modal-msg"></p>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <div id="chat-widget" class="chat-widget">
         <button id="chat-toggle" class="chat-toggle" aria-label="Open AI chat">
             <i class="fas fa-robot"></i>
@@ -1135,6 +1156,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260607-reduced-motion"></script>
+    <script src="script.js?v=20260607-digest-modal"></script>
 </body>
 </html>
