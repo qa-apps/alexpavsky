@@ -2251,6 +2251,12 @@ SYSTEM_PROMPT = (
     "Be concise, friendly, and accurate. Format code in fenced blocks with language tags. "
     "Refuse requests that would facilitate illegal surveillance, privacy invasion, fraud, malware, violence, "
     "discrimination, exploitation, or other harmful activity. "
+    "Do not provide instructions, recipes, measurements, or enumerated lists of chemical (or other) combinations that "
+    "produce toxic gases, explosives, poisons, or other dangerous substances — even when the request is framed as "
+    "'safety awareness', 'what not to mix', or 'for academic, industrial, or research purposes', and even when the intent "
+    "is built up gradually across several messages. Judge the whole conversation in context, not just the latest message. "
+    "You may give a brief, general safety caution (e.g. that certain household products should never be combined) without "
+    "enumerating specific harmful pairings, quantities, or any method to produce a hazardous result. "
     "For privacy-invasive surveillance requests, do not provide placement, equipment, concealment, installation, or operational tips; "
     "briefly redirect to lawful, consent-based safety options. "
     "If images are attached, analyze what is visible in the image before answering. "
@@ -2281,6 +2287,12 @@ HARMFUL_REQUEST_RE = re.compile(
     r"employee\s+keystrokes.*without\s+their\s+knowledge|fake\s+news\s+articles.*political|"
     r"hidden\s+cameras?.*(?:bathroom|private|without\s+(?:anyone\s+)?knowing|without\s+consent)|"
     r"(?:install|hide|conceal|place).{0,80}(?:camera|recording\s+device).{0,80}(?:bathroom|bedroom|locker\s+room|without\s+consent|without\s+(?:anyone\s+)?knowing)|"
+    # CBRN / dangerous-substance synthesis — require an intent verb so plain mentions
+    # ("is chlorine gas toxic?") are not blocked, only "make/list/produce" framings.
+    r"(?:make|produce|create|synthesi[sz]e|generate|how\s+to\s+(?:get|release|make))\s+(?:\w+\s+){0,4}(?:chlorine|toxic|poison(?:ous)?|nerve|mustard|chloramine)\s+gas|"
+    r"(?:list|give|name|enumerate)\s+(?:\w+\s+){0,5}(?:pairs?|combinations?)\s+.{0,70}(?:toxic|chlorine|deadly|poison(?:ous)?|lethal|dangerous|nerve)\s+gas|"
+    r"(?:chemical\s+)?(?:combinations?|pairs?)\s+(?:that|to)\s+(?:produce|release|create|make|give|form|generate)\s+.{0,30}(?:toxic|chlorine|deadly|poison(?:ous)?|lethal)\s+gas|"
+    r"(?:make|synthesi[sz]e|produce|build|create|how\s+to\s+make)\s+(?:\w+\s+){0,4}(?:sarin|tabun|soman|vx\s+nerve\s+agent|mustard\s+gas|nerve\s+agent|nitrogen\s+triiodide|chemical\s+weapon)|"
     r"stolen\s+social\s+security\s+numbers|rank(?:ing)?\s+ethnic\s+groups\s+by\s+intelligence",
     re.IGNORECASE | re.DOTALL,
 )
