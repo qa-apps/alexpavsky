@@ -687,10 +687,15 @@ img { max-width: 100%; display: block; }
 .tools-strip {
     position: relative;
     z-index: 2;
-    width: 100%;
-    padding: 1.25rem 1.5rem 1.5rem;
-    border-top: 1px solid rgba(255,255,255,0.07);
+    /* Full-bleed out of the hero's 1.5rem horizontal padding so the inner
+       .container lines up with the ticker / YouTube / sections (all of which
+       are rooted at the viewport, not inside the padded hero). */
+    width: calc(100% + 3rem);
     margin-top: auto;
+    margin-left: -1.5rem;
+    margin-right: -1.5rem;
+    padding: 1.25rem 0 1.5rem;
+    border-top: 1px solid rgba(255,255,255,0.07);
     background: rgba(0,0,0,0.15);
 }
 
@@ -698,9 +703,11 @@ img { max-width: 100%; display: block; }
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 1.25rem;
-    max-width: 1400px;
-    margin: 0 auto;
 }
+
+/* Tool-strip content shares the same .container width as the ticker, YouTube
+   carousel, and the sections below, so all blocks align at every viewport. */
+.tools-strip-inner { max-width: 1400px; }
 
 .tool-strip-card {
     display: flex;
@@ -1600,6 +1607,8 @@ body.light-mode .article-modal-reader blockquote { color: rgba(15,23,42,0.7); bo
 
 /* Responsive */
 @media (max-width: 768px) {
+    /* hero padding drops to 1rem here, so match the full-bleed offset */
+    .tools-strip { margin-left: -1rem; margin-right: -1rem; width: calc(100% + 2rem); }
     .yt-section .container { max-width: 100%; }
     .yt-card { width: 260px; }
     .yt-carousel-track { padding: 0 0.75rem; }
