@@ -4619,3 +4619,20 @@ body.light-mode .live-rail {
 }
 .live-foot .live-pause-btn:hover { background: var(--live-card-hover); }
 .live-foot .live-pause-btn.paused { background: var(--live-c); border-color: var(--live-c); color: #fff; }
+
+/* ─── Reduced motion ───
+   Visitors (and screenshot-based automation) that ask for reduced motion get a
+   static page: every infinite CSS animation (ticker, pulses, glows, shimmer,
+   spinners) is collapsed to a single instant pass, transitions are removed, and
+   smooth scrolling is disabled. The JS carousel auto-scroll loops are gated
+   separately in script.js (prefersReducedMotion). Together this lets the page
+   actually idle — an accessibility win and a fix for animation-driven flake in
+   automated screenshots. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

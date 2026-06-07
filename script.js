@@ -119,6 +119,17 @@
     // stays clean. Flip to true once /api/youtube returns real data.
     const YOUTUBE_LIVE_FETCH_ENABLED = false;
 
+    // True when the visitor (or an automated test) asks for reduced motion. Used
+    // to skip the perpetual requestAnimationFrame carousel loops, which otherwise
+    // keep the page from ever idling — bad for accessibility and a constant source
+    // of flake for screenshot-based automation (the page never reaches a stable
+    // frame). Paired with an @media (prefers-reduced-motion) block in style.css
+    // that neutralizes the CSS animations.
+    function prefersReducedMotion() {
+        try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+        catch (e) { return false; }
+    }
+
     const FEED_MAX_AGE_DAYS = 30;
     const FEED_CARDS_PER_VIEW = 6;
     let allArticles = [];
@@ -1172,7 +1183,11 @@
             }
             ytCarouselState.rafId = requestAnimationFrame(tick);
         }
-        tick();
+        // Skip the perpetual auto-scroll under reduced motion; manual arrow/wheel
+        // scrolling still works via manualScroll/startHold.
+        if (!prefersReducedMotion()) {
+            tick();
+        }
     }
 
     function scrollYoutubeCarousel(dir) {
@@ -1501,7 +1516,11 @@
             }
             feedCarouselState.rafId = requestAnimationFrame(tick);
         }
-        tick();
+        // Skip the perpetual auto-scroll under reduced motion; manual arrow/wheel
+        // scrolling still works via manualScroll.
+        if (!prefersReducedMotion()) {
+            tick();
+        }
     }
 
     function scrollFeedCarousel(dir) {
