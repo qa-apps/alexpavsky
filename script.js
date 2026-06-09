@@ -654,15 +654,57 @@
         return tmp.textContent || tmp.innerText || '';
     }
 
+    // Hosts whose articles do not render as a clean reader view inside the in-page Live
+    // Feed modal — the publisher blocks embedding, or the reader output is an image/avatar
+    // dump rather than readable text. Items from these sources are kept out of the feed so
+    // every card opens into a proper article. Verified 2026-06-08 by sampling each source
+    // through /api/article-page (Hugging Face blog returned 24–47 images per post).
+    var POOR_READER_HOSTS = ['towardsai.net', 'huggingface.co'];
+
+    // Per-link memory of articles that were found not to open cleanly in the modal (blocked
+    // preview or empty content). The first time an article fails to open, it is recorded
+    // here and dropped from every later feed render — i.e. "first test fails → remove it".
+    var UNREADABLE_KEY = 'alexpavsky_unreadable_links_v1';
+    var _unreadableCache = null;
+    function getUnreadableLinks() {
+        if (_unreadableCache) return _unreadableCache;
+        try { _unreadableCache = JSON.parse(localStorage.getItem(UNREADABLE_KEY)) || {}; }
+        catch (e) { _unreadableCache = {}; }
+        return _unreadableCache;
+    }
+    function markArticleUnreadable(link) {
+        if (!link) return;
+        var set = getUnreadableLinks();
+        if (set[link]) return;
+        set[link] = Date.now();
+        try { localStorage.setItem(UNREADABLE_KEY, JSON.stringify(set)); } catch (e) {}
+        // Drop the now-known-bad card from the live feed immediately.
+        if (Array.isArray(allArticles)) {
+            allArticles = filterPreviewableFeedArticles(allArticles);
+            displayArticles();
+        }
+    }
+
+    function hostFromLink(link) {
+        try { return new URL(link, window.location.href).hostname.toLowerCase(); }
+        catch (e) { return ''; }
+    }
+
     function isBlockedPreviewArticle(article) {
         var link = (article && article.link) || '';
-        try {
-            var host = new URL(link, window.location.href).hostname.toLowerCase();
-            if (host === 'pub.towardsai.net' || host === 'towardsai.net' || host.endsWith('.towardsai.net')) {
-                return true;
-            }
-        } catch (e) {}
-        return /towards\s*ai/i.test((article && article.source) || '') || /towardsai|pub\.towardsai/i.test(link);
+        var host = hostFromLink(link);
+        for (var i = 0; i < POOR_READER_HOSTS.length; i++) {
+            var bad = POOR_READER_HOSTS[i];
+            if (host === bad || host.endsWith('.' + bad)) return true;
+        }
+        // dev.to weekly "featured posts" round-ups are pure image dumps in the reader.
+        if ((host === 'dev.to' || host.endsWith('.dev.to')) && /\/devteam\//i.test(link)) return true;
+        // Legacy source-name / substring guards for Towards AI.
+        if (/towards\s*ai/i.test((article && article.source) || '')) return true;
+        if (/towardsai|pub\.towardsai/i.test(link)) return true;
+        // Anything previously found unreadable when opened in the modal.
+        if (getUnreadableLinks()[link]) return true;
+        return false;
     }
 
     function filterPreviewableFeedArticles(articles) {
@@ -1015,11 +1057,18 @@
                 })
                 .catch(function (err) {
                     if (completed) return;
+                    var msg = (err && err.message) || '';
                     var message = 'Full reader preview is unavailable for this publisher. Showing the RSS preview.';
                     if (err && err.name === 'AbortError') {
                         message = 'Full reader preview took too long. Showing the RSS preview.';
-                    } else if (err && /source blocked/i.test(err.message || '')) {
+                    } else if (/source blocked/i.test(msg)) {
                         message = 'This publisher blocks embedded reader previews. Showing the RSS preview.';
+                    }
+                    // First-test pruning: a reader-view block or empty body means this article
+                    // never opens cleanly in the feed. Remember it and remove it from the feed.
+                    // Timeouts (AbortError) are transient and are deliberately not pruned.
+                    if (view === 'reader' && (/source blocked/i.test(msg) || /empty article preview/i.test(msg))) {
+                        markArticleUnreadable(url);
                     }
                     showFallback(message);
                 });
