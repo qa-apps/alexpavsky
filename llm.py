@@ -1,16 +1,8 @@
 """
 llm.py — Multi-provider LLM orchestration layer (showcase extract)
 
-Standalone extract of the AI chat orchestration on alexpavsky.com.
 ~30 free-tier models across 7 providers (Groq, OpenRouter, Gemini,
-Hugging Face, Cerebras, SambaNova, Mistral). One reliable generate()
-built on:
-
-  1. INTENT ROUTING   — cheapest tier that fits the request.
-  2. HEALTH TRACKING  — cool down the right scope for the right duration.
-  3. FALLBACK CHAINS  — retry a different provider before giving up.
-  4. GRACEFUL DEGRADE — answer trivially if the whole pool is down.
-
+Hugging Face, Cerebras, SambaNova, Mistral).
 Reads provider keys from env (GROQ_API_KEY, …); works without keys.
 """
 
@@ -35,11 +27,7 @@ except ImportError:  # pragma: no cover
 log = logging.getLogger("llm")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 1. PROVIDER CONFIG
-# ════════════════════════════════════════════════════════════════════════════
-# Every provider speaks the OpenAI chat-completions wire format *except* Gemini,
-# which has its own request/response shape (handled separately in `_call_gemini`).
+# ── 1. PROVIDER CONFIG ───────────────────────────────────────────────────────
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -56,9 +44,6 @@ PROVIDER_API_URL = {
     "mistral": "https://api.mistral.ai/v1/chat/completions",
 }
 
-# Each provider's API key lives in an env var. Some have legacy aliases so a
-# typo'd deployment secret still resolves instead of silently disabling a whole
-# provider.
 PROVIDER_KEY_ENV = {
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
@@ -90,38 +75,30 @@ def _provider_api_key(provider):
 
 
 def _provider_available(provider):
-    """A provider is usable only if we actually hold a key for it."""
     return bool(_provider_api_key(provider))
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 2. MODEL REGISTRY
-# ════════════════════════════════════════════════════════════════════════════
-# Each model is tagged with a tier (S/M/H = small/medium/heavy) and capability
-# flags (vision / coding / search / reasoning). The router selects against these
-# tags. In production this list is *also* refreshed at runtime from the
-# OpenRouter and Hugging Face catalog APIs so newly-released free models get
-# picked up automatically; here we keep the curated static seed for clarity.
+# ── 2. MODEL REGISTRY ────────────────────────────────────────────────────────
 
 _STATIC_MODELS = [
-    # Google Gemini — the only vision-capable free models in the pool
+    # Gemini
     {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "provider": "gemini", "vision": True, "tier": "S"},
     {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "provider": "gemini", "vision": True, "tier": "M"},
     {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "provider": "gemini", "vision": True, "tier": "H"},
-    # OpenRouter free tier — broad selection, day-quota limited
+    # OpenRouter free tier
     {"id": "google/gemma-3-27b-it:free", "label": "Gemma 3 27B", "provider": "openrouter", "tier": "S"},
     {"id": "meta-llama/llama-3.3-70b-instruct:free", "label": "Llama 3.3 70B", "provider": "openrouter", "tier": "M"},
     {"id": "deepseek/deepseek-r1-0528:free", "label": "DeepSeek R1", "provider": "openrouter", "tier": "H", "reasoning": True},
     {"id": "qwen/qwen3-coder:free", "label": "Qwen 3 Coder 480B", "provider": "openrouter", "tier": "H", "coding": True},
     {"id": "nousresearch/hermes-3-llama-3.1-405b:free", "label": "Hermes 3 405B", "provider": "openrouter", "tier": "H"},
-    # Groq — fastest inference, includes web-search "compound" models
+    # Groq
     {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B Instant", "provider": "groq", "tier": "S"},
     {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B", "provider": "groq", "tier": "M"},
     {"id": "qwen/qwen3-32b", "label": "Qwen 3 32B", "provider": "groq", "tier": "H", "coding": True},
     {"id": "openai/gpt-oss-120b", "label": "GPT-OSS 120B", "provider": "groq", "tier": "H"},
     {"id": "groq/compound", "label": "Compound AI", "provider": "groq", "tier": "H", "search": True},
     {"id": "groq/compound-mini", "label": "Compound Mini", "provider": "groq", "tier": "M", "search": True},
-    # Cerebras / SambaNova / Mistral — extra capacity, different rate-limit clocks
+    # Cerebras / SambaNova / Mistral
     {"id": "llama3.1-8b", "label": "Cerebras Llama 3.1 8B", "provider": "cerebras", "tier": "S"},
     {"id": "llama-3.3-70b", "label": "Cerebras Llama 3.3 70B", "provider": "cerebras", "tier": "H"},
     {"id": "DeepSeek-V3.1", "label": "SambaNova DeepSeek V3.1", "provider": "sambanova", "tier": "M"},
@@ -130,8 +107,6 @@ _STATIC_MODELS = [
     {"id": "mistral-large-latest", "label": "Mistral Large", "provider": "mistral", "tier": "H"},
 ]
 
-# Derived views over the registry, rebuilt whenever the pool changes. Routing
-# reads these tier/capability buckets instead of scanning the full list.
 _model_lock = threading.Lock()
 CHAT_MODELS = []
 MODEL_BY_ID = {}
@@ -141,11 +116,10 @@ CODING_MODELS, SEARCH_MODELS = [], []
 
 
 def _rebuild_model_views(models):
-    """Recompute the tier/capability buckets from a flat model list."""
     global CHAT_MODELS, MODEL_BY_ID, VISION_MODEL_IDS
     global TIER_S, TIER_M, TIER_H, CODING_MODELS, SEARCH_MODELS
     with _model_lock:
-        models.sort(key=lambda m: m.get("created", 0), reverse=True)  # newest first
+        models.sort(key=lambda m: m.get("created", 0), reverse=True)
         CHAT_MODELS = models
         MODEL_BY_ID = {m["id"]: m for m in models}
         VISION_MODEL_IDS = {m["id"] for m in models if m.get("vision")}
@@ -159,55 +133,38 @@ def _rebuild_model_views(models):
 _rebuild_model_views(list(_STATIC_MODELS))
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 3. INTENT CLASSIFICATION (cheap, regex-based — runs before any network call)
-# ════════════════════════════════════════════════════════════════════════════
-# Bilingual (EN/RU) because the site serves both audiences. These never touch a
-# model — they just decide *which* model the request deserves.
+# ── 3. INTENT CLASSIFICATION ─────────────────────────────────────────────────
 
 _SIMPLE = re.compile(
-    r"^(?:hi|hello|hey|привет|здравствуй|thanks|спасибо|ok|okay|ок|"
-    r"yes|no|да|нет|bye|пока|how\s+are\s+you|как\s+дела)$",
+    r"^(?:hi|hello|hey|thanks|thank\s+you|ok|okay|yes|no|bye|how\s+are\s+you)$",
     re.IGNORECASE,
 )
 _CODE = re.compile(
-    r"(?:code|код|script|function|функци|debug|python|javascript|typescript|"
-    r"html|css|sql|react|fix\s+(?:the|this|my)\s+(?:bug|error|code)|"
-    r"почини|implement|реализуй|```|def\s+\w+|class\s+\w+|import\s+\w+)",
+    r"(?:code|script|function|debug|python|javascript|typescript|html|css|sql|"
+    r"react|fix\s+(?:the|this|my)\s+(?:bug|error|code)|implement|"
+    r"```|def\s+\w+|class\s+\w+|import\s+\w+)",
     re.IGNORECASE,
 )
 _SEARCH = re.compile(
-    r"(?:latest|newest|current|today|2024|2025|2026|последн|новост|сегодня|"
-    r"актуальн|search\s+for|who\s+won|what\s+happened|price\s+of|stock|"
-    r"weather|погода|курс)",
+    r"(?:latest|newest|current|today|2024|2025|2026|search\s+for|who\s+won|"
+    r"what\s+happened|price\s+of|stock|weather)",
     re.IGNORECASE,
 )
 _COMPLEX = re.compile(
-    r"(?:анализ|проанализируй|сравни|compare|analyze|explain\s+in\s+detail|"
-    r"step[\s-]by[\s-]step|пошагов|таблиц|table|algorithm|алгоритм|"
-    r"architect|архитектур|research|исследован|multi[\s-]?step|углубл)",
+    r"(?:compare|analyze|explain\s+in\s+detail|step[\s-]by[\s-]step|table|"
+    r"algorithm|architect|research|multi[\s-]?step)",
     re.IGNORECASE,
 )
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 4. HEALTH TRACKING — provider-aware failure classification
-# ════════════════════════════════════════════════════════════════════════════
-# The heart of the resilience story. When a call fails we don't blindly retry —
-# we read the status code + headers + body and decide:
-#   • WHAT scope to disable: a single model, a whole provider, or just the
-#     "free" sub-pool of a provider (OpenRouter free models share one daily cap).
-#   • FOR HOW LONG: a 429 blip → minutes; a daily quota → until next midnight in
-#     the provider's billing timezone; an auth failure → an hour.
-# Cooldowns live in a shared dict guarded by a lock (the server is threaded).
+# ── 4. HEALTH TRACKING ───────────────────────────────────────────────────────
 
 MODEL_HEALTH = {}
 MODEL_HEALTH_LOCK = threading.Lock()
 
 
 def _parse_ratelimit_seconds(headers):
-    """Read a cooldown hint from rate-limit headers (Retry-After in seconds,
-    or a `t=<seconds>` field in a RateLimit header). None if absent."""
+    """Read cooldown hint from rate-limit headers. Returns None if absent."""
     lower = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
     for key in ("retry-after", "x-ratelimit-reset-tokens", "x-ratelimit-reset-requests"):
         try:
@@ -243,8 +200,7 @@ def _health_key(scope, provider, model_id=None):
 
 
 def _model_health_keys(model):
-    """The cooldown keys that can disable a given model: its own, its provider's,
-    and — for OpenRouter free models — the shared free-pool key."""
+    """Cooldown keys that can disable a model: its own, provider, and free-pool (OpenRouter)."""
     provider = model.get("provider", "groq")
     keys = [_health_key("provider", provider), _health_key("model", provider, model.get("id"))]
     if provider == "openrouter" and str(model.get("id", "")).endswith(":free"):
@@ -253,8 +209,7 @@ def _model_health_keys(model):
 
 
 def _model_available(model):
-    """True if the provider key exists and no active cooldown covers this model.
-    Expired cooldowns are cleaned up lazily on read."""
+    """True if the provider key exists and no active cooldown covers this model."""
     if not model or not _provider_available(model.get("provider", "groq")):
         return False
     now = time.time()
@@ -269,16 +224,7 @@ def _model_available(model):
 
 
 def _cooldown_target(model, err):
-    """Map a failure to (scope, key, cooldown_seconds, reason).
-
-    This is where provider quirks are encoded:
-      • OpenRouter free models share a per-DAY cap → disable the whole free pool
-        until next UTC midnight, not just the one model.
-      • Gemini daily limits reset on Pacific time, not UTC.
-      • Hugging Face runs on a MONTHLY credit budget.
-      • Auth errors (401/403) usually mean a dead key → disable the provider.
-      • 404 / 'no endpoints' means the model vanished → bench it for a day.
-    """
+    """Map a failure to (scope, key, cooldown_seconds, reason)."""
     provider = model.get("provider", "groq")
     model_id = model.get("id")
     headers = err.get("headers", {}) if isinstance(err, dict) else {}
@@ -323,7 +269,6 @@ def _cooldown_target(model, err):
 
 
 def _record_model_failure(model, err):
-    """Apply the computed cooldown to the shared health map."""
     if not model or not err:
         return
     scope, key, seconds, reason = _cooldown_target(model, err)
@@ -341,33 +286,25 @@ def _record_model_failure(model, err):
                 model.get("label"), scope, reason, int(seconds))
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 5. ROUTING — pick the right model for the request
-# ════════════════════════════════════════════════════════════════════════════
+# ── 5. ROUTING ───────────────────────────────────────────────────────────────
 
 def _pick(candidates):
-    """Weighted random choice among *available* candidates, biased toward the
-    newest models (registry is newest-first, so a linear decay favors index 0).
-    Randomness also spreads load across equivalent models so no single free
-    model burns its quota first."""
+    """Weighted random choice among available candidates (newest-first bias)."""
     available = [m for m in candidates if _model_available(m)]
     if not available:
         return None
     n = len(available)
-    weights = [n - i for i in range(n)]  # newest gets weight n, oldest gets 1
+    weights = [n - i for i in range(n)]
     return random.choices(available, weights=weights, k=1)[0]
 
 
 def _route(message, attachments):
-    """Return (model, tier, reason). Order matters: capability needs (vision,
-    code, files) win over length heuristics. Falls back down the tiers so a
-    request is never dropped just because the ideal tier is on cooldown."""
+    """Return (model, tier, reason). Capability needs win over length heuristics."""
     has_images = any(a.get("kind") == "image" for a in attachments)
     has_files = any(a.get("kind") in ("text", "file", "doc") for a in attachments)
     msg_len = len(message)
 
     if has_images:
-        # Vision is a hard capability gate — only Gemini models qualify.
         vision_pool = [MODEL_BY_ID.get(i) for i in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash") if MODEL_BY_ID.get(i)]
         best = _pick(vision_pool)
         if best:
@@ -401,24 +338,20 @@ def _route(message, attachments):
     best = _pick(TIER_M) or _pick(TIER_H) or _pick(TIER_S)
     if best:
         return best, "M", "general"
-    # Last resort: nothing is healthy — hand back any model so the caller can
-    # try and surface a real error rather than crashing on an empty pool.
+    # Last resort: return any model so the caller surfaces a real error.
     return next((m for m in CHAT_MODELS if _model_available(m)), CHAT_MODELS[0]), "M", "fallback"
 
 
 def _get_fallback_chain(current, tier):
-    """Ordered list of models to try after `current` fails. Cross-provider
-    candidates come FIRST — if Groq is rate-limiting us, retrying another Groq
-    model just fails again, so we jump to OpenRouter/Gemini/etc. before
-    exhausting same-provider options."""
+    """Ordered fallback list after `current` fails — cross-provider candidates first."""
     tried = {current["id"]}
     chain = []
     pool = TIER_S + TIER_M + TIER_H if tier == "S" else TIER_M + TIER_H + TIER_S
-    for m in pool:  # pass 1: different provider only
+    for m in pool:  # pass 1: different provider
         if m["id"] not in tried and m.get("provider") != current.get("provider") and _model_available(m):
             chain.append(m)
             tried.add(m["id"])
-    for m in pool:  # pass 2: anything else still healthy
+    for m in pool:  # pass 2: same provider, still healthy
         if m["id"] not in tried and _model_available(m):
             chain.append(m)
             tried.add(m["id"])
@@ -429,13 +362,7 @@ def _max_tokens(tier):
     return {"S": 512, "M": 1024}.get(tier, 2048)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 6. ATTACHMENT HANDLING — normalize multimodal input into a provider payload
-# ════════════════════════════════════════════════════════════════════════════
-# Plumbing: clamp/whitelist client uploads, then assemble the user turn as a
-# plain string (text-only) or an OpenAI-style parts list when an image goes to a
-# vision model. An image routed to a text-only model degrades to a note, not a
-# failed call.
+# ── 6. ATTACHMENT HANDLING ───────────────────────────────────────────────────
 
 MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 12000
@@ -446,7 +373,7 @@ def _clean(val, limit):
 
 
 def _sanitize_attachments(items):
-    """Defensive: clamp count, whitelist kinds, truncate oversized text."""
+    """Clamp count, whitelist kinds, truncate oversized text."""
     out = []
     for item in (items if isinstance(items, list) else [])[:MAX_ATTACHMENTS]:
         if not isinstance(item, dict):
@@ -462,9 +389,7 @@ def _sanitize_attachments(items):
 
 
 def _build_content(message, attachments, model_id):
-    """Assemble the user turn → (content, warning). Plain string for text-only
-    turns; an OpenAI parts list when a vision model gets an image. Non-vision
-    models get a text note about the image instead of a failure."""
+    """Assemble user turn → (content, warning). Plain string or OpenAI parts list."""
     parts, warning, notes = [], "", []
     if message.strip():
         parts.append({"type": "text", "text": message.strip()})
@@ -488,17 +413,10 @@ def _build_content(message, attachments, model_id):
     return parts, warning
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 7. THE CALL LAYER — one function, every provider, structured errors
-# ════════════════════════════════════════════════════════════════════════════
-# `_call_model` returns (reply, err). On failure `err` is a structured dict
-# (status / headers / body / code) — precisely the shape `_cooldown_target`
-# needs to make a good benching decision. Never raises; the orchestrator above
-# stays a clean loop.
+# ── 7. CALL LAYER ────────────────────────────────────────────────────────────
 
 def _content_to_gemini_parts(user_content):
-    """Gemini uses {text} / {inline_data} parts instead of OpenAI's
-    {type:text} / {type:image_url}, so multimodal content is re-shaped here."""
+    """Re-shape OpenAI content into Gemini {text}/{inline_data} parts."""
     parts = []
     if isinstance(user_content, str):
         return [{"text": user_content}]
@@ -537,7 +455,7 @@ def _call_gemini(model_id, system_prompt, user_content, api_key, history=None):
 
 
 def _extract_reply(data):
-    """OpenAI-format responses put content either as a string or a parts list."""
+    """Extract text from an OpenAI-format response."""
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     if isinstance(content, str):
         return content
@@ -547,9 +465,7 @@ def _extract_reply(data):
 
 
 def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
-    """Dispatch one completion. Returns (reply, None) on success or
-    (None, err_dict) on any failure — including 'empty response' and HTML error
-    pages some providers return with a 200."""
+    """Dispatch one completion. Returns (reply, None) or (None, err_dict)."""
     provider = model.get("provider", "groq")
     api_key = _provider_api_key(provider)
     if not api_key:
@@ -576,7 +492,7 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
         req = Request(base_url, data=json.dumps(payload).encode(), headers=headers, method="POST")
         with urlopen(req, timeout=25) as resp:
             raw = resp.read().decode()
-            if raw.lstrip().startswith("<"):  # provider returned an HTML error page
+            if raw.lstrip().startswith("<"):  # HTML error page
                 return None, {"code": "html_response", "provider": provider, "model": model.get("id"), "body": raw[:300]}
             reply = _extract_reply(json.loads(raw))
             if not reply or not reply.strip():
@@ -599,25 +515,19 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
         return None, {"code": "unknown", "provider": provider, "model": model.get("id"), "body": str(e)[:300]}
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 8. DEGRADED MODE — answer trivial turns with no model at all
-# ════════════════════════════════════════════════════════════════════════════
+# ── 8. DEGRADED MODE ─────────────────────────────────────────────────────────
 
 def _local_fallback_reply(message):
-    """When the entire pool is down, still greet/thank in the user's language so
-    a dead backend doesn't show as a hard error for a one-word message."""
+    """Handle trivial greetings when the whole pool is down."""
     text = (message or "").strip().lower()
-    is_ru = bool(re.search(r"[а-яё]", text, re.IGNORECASE))
-    if re.fullmatch(r"(hi|hello|hey|привет|здравствуй|добрый\s+день)", text, re.IGNORECASE):
-        return "Привет! Я на связи. Чем помочь?" if is_ru else "Hi! I'm online. How can I help?"
-    if re.fullmatch(r"(thanks|thank you|спасибо)", text, re.IGNORECASE):
-        return "Пожалуйста." if is_ru else "You're welcome."
+    if re.fullmatch(r"(hi|hello|hey|good\s+(?:morning|afternoon|evening))", text, re.IGNORECASE):
+        return "Hi! I'm online. How can I help?"
+    if re.fullmatch(r"(thanks|thank you)", text, re.IGNORECASE):
+        return "You're welcome."
     return ""
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 9. PUBLIC ENTRY POINT — route → call → fallback chain → degrade
-# ════════════════════════════════════════════════════════════════════════════
+# ── 9. PUBLIC ENTRY POINT ────────────────────────────────────────────────────
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are the AI assistant on alexpavsky.com. Be concise, accurate, and "
@@ -626,35 +536,27 @@ DEFAULT_SYSTEM_PROMPT = (
 
 
 def generate(message, attachments=None, history=None, system_prompt=DEFAULT_SYSTEM_PROMPT):
-    """Turn a user message (+ optional attachments/history) into an answer,
-    surviving the unreliability of a free-tier model pool.
+    """Route a user message through the model pool and return a reply dict.
 
-    Returns a dict:
-        {"reply": str, "model": str, "tier": str, "reason": str,
-         "warning": str|None, "degraded": bool}
-    or {"error": str, "reply": <user-facing message>} if everything is down.
-
-    This mirrors the request path in chat_server.py with the HTTP/session/DB
-    plumbing stripped away, so the orchestration is visible in one place.
+    Returns:
+        {"reply", "model", "tier", "reason", "warning", "degraded"}
+        or {"error", "reply"} if the whole pool is down.
     """
     message = _clean(message, MAX_TEXT_CHARS)
     attachments = _sanitize_attachments(attachments or [])
     history = (history if isinstance(history, list) else [])[-20:]
 
-    # 1. Route to the best-fit healthy model.
     model, tier, reason = _route(message, attachments)
     max_tok = _max_tokens(tier)
     user_content, warning = _build_content(message, attachments, model["id"])
     log.info("route: %s tier=%s reason=%s", model["label"], tier, reason)
 
-    # 2. Primary attempt.
     reply, err = _call_model(model, system_prompt, user_content, max_tok, history)
     if not reply or not reply.strip():
         _record_model_failure(model, err)
 
-        # 3. Walk the cross-provider fallback chain.
         chain = _get_fallback_chain(model, tier)
-        if reason == "vision":  # an image turn can only go to another vision model
+        if reason == "vision":
             chain = [m for m in chain if m.get("id") in VISION_MODEL_IDS]
         for fallback in chain:
             if not _model_available(fallback):
@@ -668,7 +570,6 @@ def generate(message, attachments=None, history=None, system_prompt=DEFAULT_SYST
             _record_model_failure(fallback, err)
             time.sleep(0.5)
 
-    # 4. Whole pool down → degrade locally or surface a clean error.
     if not reply or not reply.strip():
         local = _local_fallback_reply(message)
         if local:
@@ -682,9 +583,6 @@ def generate(message, attachments=None, history=None, system_prompt=DEFAULT_SYST
 
 
 if __name__ == "__main__":
-    # Tiny manual smoke harness. With provider keys in the environment this
-    # makes a real call; without them it shows the routing decision and a clean
-    # "missing key" path. Either way it exercises route → call → fallback.
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     for probe in ("hi", "Write a Python function to reverse a linked list",
                   "What's the latest news on LLM evaluation?"):

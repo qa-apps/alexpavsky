@@ -2331,37 +2331,35 @@ HARMFUL_REQUEST_REFUSAL = (
 )
 
 _COMPLEX = re.compile(
-    r"(?:анализ|проанализируй|сравни|compare|analyze|explain\s+in\s+detail|"
-    r"step[\s-]by[\s-]step|пошагов|таблиц|table|"
-    r"algorithm|алгоритм|architect|архитектур|"
+    r"(?:compare|analyze|explain\s+in\s+detail|"
+    r"step[\s-]by[\s-]step|table|"
+    r"algorithm|architect|"
     r"write\s+(?:a\s+)?(?:full|complete|detailed)|"
-    r"напиши\s+(?:полн|подробн|детальн)|"
-    r"research|исследован|multi[\s-]?step|углубл)",
+    r"research|multi[\s-]?step)",
     re.IGNORECASE,
 )
 
 _CODE = re.compile(
-    r"(?:code|код|script|скрипт|function|функци|debug|дебаг|"
+    r"(?:code|script|function|debug|"
     r"python|javascript|typescript|html|css|sql|react|"
     r"fix\s+(?:the|this|my)\s+(?:bug|error|code)|"
-    r"почини|исправь\s+(?:код|ошибк)|implement|реализуй|"
+    r"implement|"
     r"```|def\s+\w+|class\s+\w+|import\s+\w+)",
     re.IGNORECASE,
 )
 
 _SEARCH = re.compile(
     r"(?:latest|newest|current|today|2024|2025|2026|"
-    r"последн|новост|сегодня|актуальн|"
     r"search\s+for|who\s+won|what\s+happened|"
-    r"price\s+of|stock|weather|погода|курс)",
+    r"price\s+of|stock|weather)",
     re.IGNORECASE,
 )
 
 _SIMPLE = re.compile(
-    r"^(?:hi|hello|hey|привет|здравствуй|добрый\s+день|"
-    r"thanks|спасибо|ok|okay|ок|хорошо|"
-    r"yes|no|да|нет|bye|пока|"
-    r"how\s+are\s+you|как\s+дела|"
+    r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|"
+    r"thanks|thank\s+you|ok|okay|"
+    r"yes|no|bye|"
+    r"how\s+are\s+you|"
     r"what\s+(?:is|are)\s+\w+\??|who\s+(?:is|are)\s+\w+\??)$",
     re.IGNORECASE,
 )
@@ -2828,12 +2826,10 @@ def _get_fallback_chain(current, tier):
 
 def _local_fallback_reply(message):
     text = (message or "").strip().lower()
-    if re.fullmatch(r"(hi|hello|hey|привет|здравствуй|добрый\s+день)", text, re.IGNORECASE):
-        if re.search(r"[а-яё]", text, re.IGNORECASE):
-            return "Привет! Я на связи. Чем помочь?"
+    if re.fullmatch(r"(hi|hello|hey|good\s+(?:morning|afternoon|evening))", text, re.IGNORECASE):
         return "Hi! I'm online. How can I help?"
-    if re.fullmatch(r"(thanks|thank you|спасибо)", text, re.IGNORECASE):
-        return "Пожалуйста." if re.search(r"[а-яё]", text, re.IGNORECASE) else "You're welcome."
+    if re.fullmatch(r"(thanks|thank you)", text, re.IGNORECASE):
+        return "You're welcome."
     return ""
 
 
