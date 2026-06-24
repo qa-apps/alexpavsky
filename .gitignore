@@ -1,10 +1,15 @@
 .env
+.env.*
+!.env.example
 node_modules/
 .DS_Store
 *.db
 *.sqlite
 *.sqlite3
 *.log
+*.csv
+*.dump
+*.sql.gz
 *.bak
 *.tmp
 *.swp
