@@ -13,6 +13,7 @@ import smtplib
 import ssl
 import threading
 import time
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -2276,6 +2277,32 @@ PROMPT_EXTRACTION_REFUSAL = (
     "I can still help with safe prompt design, AI testing, or red-team evaluation."
 )
 
+_GUARDRAIL_CONFUSABLES = str.maketrans({
+    # Cyrillic
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
+    "і": "i", "ӏ": "l", "ѕ": "s", "у": "y", "к": "k", "м": "m",
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
+    "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X",
+    # Greek
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I",
+    "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T",
+    "Υ": "Y", "Χ": "X", "α": "a", "ο": "o", "ρ": "p", "υ": "u",
+    "ν": "v",
+})
+
+
+def _normalize_guardrail_text(text: str) -> str:
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKC", text).translate(_GUARDRAIL_CONFUSABLES)
+    collapsed = []
+    for ch in normalized:
+        category = unicodedata.category(ch)
+        if category.startswith("C") or category == "Mn":
+            continue
+        collapsed.append(ch)
+    return " ".join("".join(collapsed).split())
+
 HARMFUL_REQUEST_RE = re.compile(
     r"phishing|social\s+engineering|stolen\s+(?:credit\s+)?card|credit\s+card\s+(?:fraud|numbers)|"
     r"fake\s+investment|ransomware|malware|steal\s+session|session\s+cookies|"
@@ -3508,13 +3535,15 @@ class Handler(SimpleHTTPRequestHandler):
 
         log.info("route: %s tier=%s reason=%s sid=%s", model["label"], tier, reason, session_id[:8])
 
-        if PROMPT_EXTRACTION_RE.search(message or ""):
+        guardrail_message = _normalize_guardrail_text(message or "")
+
+        if PROMPT_EXTRACTION_RE.search(guardrail_message):
             reply = PROMPT_EXTRACTION_REFUSAL
             _log_message(session_id, ip_hash, "assistant", reply, "guardrail")
             self._json(200, {"reply": reply}, new_session)
             return
 
-        if HARMFUL_REQUEST_RE.search(message or ""):
+        if HARMFUL_REQUEST_RE.search(guardrail_message):
             reply = HARMFUL_REQUEST_REFUSAL
             _log_message(session_id, ip_hash, "assistant", reply, "guardrail")
             self._json(200, {"reply": reply}, new_session)

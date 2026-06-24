@@ -136,11 +136,13 @@
     let displayedCount = 0;
     const ARTICLES_PER_PAGE = 9;
     const FEED_MANUAL_SCROLL_STEP = 360;
-    const FEED_AUTOSCROLL_PX_PER_FRAME = 0.3;
+    // Keep the feed cards stationary so pointer clicks can reliably land on
+    // the interactive surface; manual arrow / wheel / touch scrolling still works.
+    const FEED_AUTOSCROLL_PX_PER_FRAME = 0;
     const FEED_RESUME_AFTER_INTERACTION_MS = 1800;
     const YT_MANUAL_SCROLL_STEP = 480;
     const YT_MOBILE_SCROLL_STEP = 300;
-    const YT_AUTOSCROLL_PX_PER_FRAME = 0.35;
+    const YT_AUTOSCROLL_PX_PER_FRAME = 1;
     const YT_HOLD_SCROLL_MULTIPLIER = 3;
     const YT_HOLD_START_DELAY_MS = 120;
     const YT_RESUME_AFTER_INTERACTION_MS = 1800;
@@ -1187,6 +1189,7 @@
         function halfWidth() { return content.scrollWidth / 2; }
         ytCarouselState = {
             rafId: 0,
+            scrollPos: track.scrollLeft || 0,
             pauseUntil: 0,
             holdDir: 0,
             pause: function (ms) {
@@ -1194,8 +1197,9 @@
             },
             manualScroll: function (dir) {
                 ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
-                track.scrollBy({
-                    left: dir * getYoutubeScrollStep(),
+                ytCarouselState.scrollPos = normalizeScrollPosition(track.scrollLeft + dir * getYoutubeScrollStep());
+                track.scrollTo({
+                    left: ytCarouselState.scrollPos,
                     behavior: 'smooth'
                 });
             },
@@ -1208,6 +1212,17 @@
                 ytCarouselState.pause(YT_RESUME_AFTER_INTERACTION_MS);
             }
         };
+        function normalizeScrollPosition(value) {
+            var h = halfWidth();
+            if (h <= 0) return value;
+            while (value >= h) value -= h;
+            while (value < 0) value += h;
+            return value;
+        }
+        function addScroll(delta) {
+            ytCarouselState.scrollPos = normalizeScrollPosition(ytCarouselState.scrollPos + delta);
+            track.scrollLeft = Math.round(ytCarouselState.scrollPos);
+        }
         // Pause auto-scroll on manual user input
         if (!track.__pauseListenerInstalled) {
             ['wheel', 'touchstart', 'touchmove', 'pointerdown'].forEach(function (ev) {
@@ -1219,16 +1234,9 @@
         }
         function tick() {
             if (ytCarouselState.holdDir) {
-                track.scrollLeft += ytCarouselState.holdDir * (YT_AUTOSCROLL_PX_PER_FRAME * YT_HOLD_SCROLL_MULTIPLIER);
+                addScroll(ytCarouselState.holdDir * (YT_AUTOSCROLL_PX_PER_FRAME * YT_HOLD_SCROLL_MULTIPLIER));
             } else if (Date.now() >= ytCarouselState.pauseUntil && !track.matches(':hover')) {
-                track.scrollLeft += YT_AUTOSCROLL_PX_PER_FRAME;
-            }
-            var h = halfWidth();
-            if (h > 0 && track.scrollLeft >= h) {
-                track.scrollLeft -= h;
-            }
-            if (track.scrollLeft < 0) {
-                track.scrollLeft += h;
+                addScroll(YT_AUTOSCROLL_PX_PER_FRAME);
             }
             ytCarouselState.rafId = requestAnimationFrame(tick);
         }
@@ -1534,18 +1542,31 @@
         function halfWidth() { return grid.scrollWidth / 2; }
         feedCarouselState = {
             rafId: 0,
+            scrollPos: grid.scrollLeft || 0,
             pauseUntil: 0,
             pause: function (ms) {
                 feedCarouselState.pauseUntil = Date.now() + ms;
             },
             manualScroll: function (dir) {
                 feedCarouselState.pause(FEED_RESUME_AFTER_INTERACTION_MS);
-                grid.scrollBy({
-                    left: dir * FEED_MANUAL_SCROLL_STEP,
+                feedCarouselState.scrollPos = normalizeScrollPosition(grid.scrollLeft + dir * FEED_MANUAL_SCROLL_STEP);
+                grid.scrollTo({
+                    left: feedCarouselState.scrollPos,
                     behavior: 'smooth'
                 });
             }
         };
+        function normalizeScrollPosition(value) {
+            var h = halfWidth();
+            if (h <= 0) return value;
+            while (value >= h) value -= h;
+            while (value < 0) value += h;
+            return value;
+        }
+        function addScroll(delta) {
+            feedCarouselState.scrollPos = normalizeScrollPosition(feedCarouselState.scrollPos + delta);
+            grid.scrollLeft = Math.round(feedCarouselState.scrollPos);
+        }
         // Pause auto-scroll when user scrolls manually (wheel/trackpad/touch)
         if (!grid.__pauseListenerInstalled) {
             ['wheel', 'touchstart', 'touchmove', 'pointerdown'].forEach(function (ev) {
@@ -1557,11 +1578,7 @@
         }
         function tick() {
             if (Date.now() >= feedCarouselState.pauseUntil && !grid.matches(':hover')) {
-                grid.scrollLeft += FEED_AUTOSCROLL_PX_PER_FRAME;
-                var h = halfWidth();
-                if (h > 0 && grid.scrollLeft >= h) {
-                    grid.scrollLeft -= h;
-                }
+                addScroll(FEED_AUTOSCROLL_PX_PER_FRAME);
             }
             feedCarouselState.rafId = requestAnimationFrame(tick);
         }
@@ -4368,12 +4385,13 @@
             }, { passive: true });
             viewport.addEventListener('touchmove', function (e) {
                 if (touchStartY === null) return;
+                e.preventDefault();
                 var dy = e.touches[0].clientY - touchStartY;
                 offset = touchStartOffset - dy;
                 wrapOffset();
                 applyTranslate();
                 bumpUserActivity();
-            }, { passive: true });
+            }, { passive: false });
             viewport.addEventListener('touchend', function () {
                 touchStartY = null;
                 bumpUserActivity();

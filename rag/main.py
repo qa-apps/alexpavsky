@@ -59,6 +59,12 @@ QDRANT_COLLECTION = "documents"
 CHUNK_TOKENS = 500
 OVERLAP_TOKENS = 50
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "10"))
+DEFAULT_CORS_ORIGINS = (
+    "https://alexpavsky.com",
+    "https://www.alexpavsky.com",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("rag-api")
@@ -96,6 +102,12 @@ except Exception:
 def get_pg():
     """Return a psycopg2 connection (caller must close)."""
     return psycopg2.connect(DATABASE_URL)
+
+
+def cors_origins() -> list[str]:
+    raw = os.environ.get("RAG_CORS_ORIGINS", "")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or list(DEFAULT_CORS_ORIGINS)
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +295,7 @@ app = FastAPI(title="alexpavsky RAG API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -681,17 +693,23 @@ async def health():
     qdrant_status = "connected"
     ts = datetime.now(tz=timezone.utc).isoformat()
 
+    conn = None
     try:
         conn = get_pg()
-        conn.cursor().execute("SELECT 1")
-        conn.close()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
     except Exception as exc:
-        pg_status = f"error: {exc}"
+        log.warning("Postgres health check failed: %s", exc)
+        pg_status = "error"
+    finally:
+        if conn is not None:
+            conn.close()
 
     try:
         qdrant_client.get_collections()
     except Exception as exc:
-        qdrant_status = f"error: {exc}"
+        log.warning("Qdrant health check failed: %s", exc)
+        qdrant_status = "error"
 
     overall = "ok" if pg_status == "connected" and qdrant_status == "connected" else "degraded"
     return {

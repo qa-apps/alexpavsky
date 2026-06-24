@@ -10,3 +10,13 @@ node_modules/
 *.swp
 *.pyc
 __pycache__/
+
+# Graphify knowledge graph (generated, not for version control)
+graphify-out/
+
+# Temporary & tooling directories
+tmp/
+screenshots/
+.codex/
+.codex-automation/
+.playwright-mcp/

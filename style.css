@@ -1471,7 +1471,7 @@ body.light-mode .article-modal-reader blockquote { color: rgba(15,23,42,0.7); bo
     position: relative;
     padding: 0 1.75rem;
     border-radius: var(--radius-lg);
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
 }
 .yt-carousel-track::-webkit-scrollbar { display: none; }
 .yt-carousel-content {
@@ -1726,7 +1726,7 @@ body.light-mode .article-modal-reader blockquote { color: rgba(15,23,42,0.7); bo
     display: flex;
     gap: 1.25rem;
     overflow-x: auto;
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
     padding: 0.25rem 1.75rem 0.75rem;
@@ -4597,6 +4597,8 @@ body.light-mode .live-rail {
 .live-head .live-close:hover { color: var(--live-text); }
 .live-viewport {
     flex: 1; overflow: hidden; position: relative;
+    touch-action: none;
+    overscroll-behavior: contain;
     -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
     mask-image: linear-gradient(180deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
 }
