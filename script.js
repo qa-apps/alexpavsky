@@ -3745,10 +3745,54 @@
             return html;
         }
 
-        function addBotMessage(text) {
+        function looksRussian(text) {
+            return /[А-Яа-яЁё]/.test(text || '');
+        }
+
+        function toolJsonFallback(userMessage) {
+            return looksRussian(userMessage)
+                ? 'Я не должен показывать скрытый JSON tool-call в чате. Если нужна картинка, попроси обычным текстом: я использую доступную генерацию, когда квота доступна.'
+                : 'I should not show hidden tool-call JSON in the chat. If you want an image, ask normally and I will use the available image-generation endpoint when quota is available.';
+        }
+
+        function sanitizeBotReply(text, userMessage) {
+            var raw = String(text || '').trim();
+            var fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+            if (fenced) raw = fenced[1].trim();
+            if (/^(\{[\s\S]*\})$/.test(raw)) {
+                try {
+                    var parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object') {
+                        var action = String(parsed.action || parsed.function_call || '').toLowerCase();
+                        if (parsed.action_input || action.indexOf('dalle') !== -1 || action.indexOf('text2im') !== -1) {
+                            return toolJsonFallback(userMessage);
+                        }
+                    }
+                } catch (_) {}
+            }
+            if (/"action"\s*:\s*"[^"]+"|"action_input"\s*:|"thought"\s*:/i.test(raw)) {
+                return toolJsonFallback(userMessage);
+            }
+            return text;
+        }
+
+        function renderBotImages(images) {
+            var safeImages = (images || []).filter(function (image) {
+                var url = image && typeof image.data_url === 'string' ? image.data_url : '';
+                return /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(url);
+            });
+            if (!safeImages.length) return '';
+            return '<div class="chat-generated-images">' + safeImages.map(function (image) {
+                return '<figure class="chat-generated-image">' +
+                    '<img src="' + escapeHtml(image.data_url) + '" alt="' + escapeHtml(image.alt || 'Generated image') + '" loading="lazy">' +
+                '</figure>';
+            }).join('') + '</div>';
+        }
+
+        function addBotMessage(text, images) {
             var div = document.createElement('div');
             div.className = 'chat-message bot-message';
-            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content">' + renderBotMarkdown(text) + '</div>';
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content">' + renderBotMarkdown(text || '') + renderBotImages(images) + '</div>';
             chatMessages.appendChild(div);
             scrollToBottom();
         }
@@ -3830,10 +3874,11 @@
                 hideTypingIndicator();
 
                 var reply = data && typeof data.reply === 'string' ? data.reply : '';
-                var botMsg = reply || 'Sorry, I didn\'t get a response. Please try again.';
+                var images = data && Array.isArray(data.images) ? data.images : [];
+                var botMsg = sanitizeBotReply(reply, userMessage) || 'Sorry, I didn\'t get a response. Please try again.';
                 conversationHistory.push({ role: 'assistant', content: botMsg });
                 if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-30);
-                addBotMessage(botMsg);
+                addBotMessage(botMsg, images);
 
             } catch (error) {
                 hideTypingIndicator();

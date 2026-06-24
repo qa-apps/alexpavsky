@@ -555,6 +555,8 @@ CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
 SAMBANOVA_API_URL = "https://api.sambanova.ai/v1/chat/completions"
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_INTERACTIONS_API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image").strip() or "gemini-3.1-flash-image"
 OPENROUTER_REFERER = "https://alexpavsky.com"
 OPENROUTER_TITLE = "AlexPavsky AI Chat"
 RSS2JSON_API_URL = "https://api.rss2json.com/v1/api.json?rss_url="
@@ -2262,6 +2264,8 @@ SYSTEM_PROMPT = (
     "briefly redirect to lawful, consent-based safety options. "
     "If images are attached, analyze what is visible in the image before answering. "
     "If files are attached, analyze their provided text/content first and summarize the important details. "
+    "Do not emit tool-call JSON such as dalle.text2im, action_input, function_call, or thoughts. "
+    "If the user asks to generate an image, say that the site will use its image-generation endpoint or explain availability in plain text. "
     "Answer in the user's language when possible."
 )
 
@@ -2831,6 +2835,170 @@ def _local_fallback_reply(message):
     if re.fullmatch(r"(thanks|thank you)", text, re.IGNORECASE):
         return "You're welcome."
     return ""
+
+
+IMAGE_GENERATION_RE = re.compile(
+    r"("
+    r"\b(?:generate|create|make|draw|render|paint|design)\b.{0,120}\b(?:image|picture|photo|illustration|icon|logo|wallpaper|poster|art)\b|"
+    r"\b(?:image|picture|photo|illustration|icon|logo|wallpaper|poster|art)\b.{0,80}\b(?:generate|create|make|draw|render|paint|design)\b|"
+    r"(?:сгенерируй|создай|сделай|нарисуй|сгенерировать|создать|нарисовать).{0,120}(?:картин|изображ|фото|икон|логотип|постер|арт)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+TOOL_CALL_JSON_REFUSAL_EN = (
+    "I can't execute hidden tool-call JSON in the chat UI. "
+    "If you want an image, ask for it normally and I'll use the available image-generation endpoint when quota is available."
+)
+
+TOOL_CALL_JSON_REFUSAL_RU = (
+    "Я не должен показывать или исполнять скрытый JSON tool-call в чате. "
+    "Если нужна картинка, попроси обычным текстом: я использую доступный endpoint генерации, когда квота доступна."
+)
+
+
+def _looks_russian(text):
+    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
+
+
+def _is_image_generation_request(message):
+    return bool(IMAGE_GENERATION_RE.search(message or ""))
+
+
+def _image_generation_unavailable_reply(message, err):
+    code = _err_code(err) or "image_generation_unavailable"
+    if _looks_russian(message):
+        if code in {"too_many_requests", "quota_exhausted"} or "quota" in str(code):
+            return "Генерация картинок через Gemini подключена, но текущая API-квота исчерпана. Попробуй позже."
+        if code == "missing_gemini_key":
+            return "Генерация картинок через Gemini сейчас не настроена: нет GEMINI_API_KEY на сервере."
+        return "Генерация картинок через Gemini сейчас недоступна. Попробуй позже."
+    if code in {"too_many_requests", "quota_exhausted"} or "quota" in str(code):
+        return "Gemini image generation is connected, but the current API quota is exhausted. Please try again later."
+    if code == "missing_gemini_key":
+        return "Gemini image generation is not configured on the server yet."
+    return "Gemini image generation is temporarily unavailable. Please try again later."
+
+
+def _attachment_image_part(attachment):
+    data_url = attachment.get("data_url") if isinstance(attachment, dict) else ""
+    if not isinstance(data_url, str) or not data_url.startswith("data:image/") or "," not in data_url:
+        return None
+    header, b64 = data_url.split(",", 1)
+    mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "image/jpeg"
+    return {"type": "image", "mime_type": mime, "data": b64}
+
+
+def _extract_generated_image(data):
+    candidates = []
+    if isinstance(data, dict):
+        for key in ("output_image", "outputImage"):
+            if isinstance(data.get(key), dict):
+                candidates.append(data[key])
+        for step in data.get("steps", []) if isinstance(data.get("steps"), list) else []:
+            if not isinstance(step, dict):
+                continue
+            for field in ("content", "summary", "output"):
+                blocks = step.get(field)
+                if isinstance(blocks, list):
+                    candidates.extend(block for block in blocks if isinstance(block, dict))
+                elif isinstance(blocks, dict):
+                    candidates.append(blocks)
+    for item in candidates:
+        if item.get("data") and str(item.get("type", "image")).lower() == "image":
+            mime = item.get("mime_type") or item.get("mimeType") or "image/jpeg"
+            return {"mime_type": mime, "data": item.get("data")}
+        if item.get("data") and (item.get("mime_type") or item.get("mimeType")):
+            mime = item.get("mime_type") or item.get("mimeType")
+            if str(mime).startswith("image/"):
+                return {"mime_type": mime, "data": item.get("data")}
+    return None
+
+
+def _call_gemini_image(message, attachments):
+    api_key = _provider_api_key("gemini")
+    if not api_key:
+        return None, {"code": "missing_gemini_key"}
+    prompt = (message or "").strip()[:4000]
+    inputs = [{"type": "text", "text": prompt}]
+    for attachment in attachments or []:
+        if attachment.get("kind") == "image":
+            part = _attachment_image_part(attachment)
+            if part:
+                inputs.append(part)
+    payload = {
+        "model": GEMINI_IMAGE_MODEL,
+        "input": inputs,
+        "response_format": {
+            "type": "image",
+            "mime_type": "image/jpeg",
+            "aspect_ratio": "1:1",
+        },
+    }
+    req = Request(
+        GEMINI_INTERACTIONS_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=90) as resp:
+            raw = resp.read().decode("utf-8")
+        data = json.loads(raw)
+        if data.get("error"):
+            err = data["error"]
+            return None, {"code": err.get("code") or err.get("status") or "image_error", "body": err.get("message", "")[:500]}
+        image = _extract_generated_image(data)
+        if not image:
+            return None, {"code": "no_image_output", "body": raw[:500]}
+        mime = image.get("mime_type") or "image/jpeg"
+        b64 = str(image.get("data") or "")
+        return {
+            "mime_type": mime,
+            "data_url": f"data:{mime};base64,{b64}",
+            "alt": prompt[:160] or "Generated image",
+        }, None
+    except HTTPError as e:
+        body = ""
+        code = f"http_{e.code}"
+        try:
+            body = e.read().decode("utf-8")[:1000]
+            parsed = json.loads(body)
+            err = parsed.get("error") or {}
+            code = err.get("code") or err.get("status") or code
+        except Exception:
+            pass
+        return None, {"code": code, "status": e.code, "body": body}
+    except (URLError, TimeoutError) as e:
+        return None, {"code": "timeout", "body": str(e)[:300]}
+    except Exception as e:
+        return None, {"code": "unknown", "body": str(e)[:300]}
+
+
+def _plain_tool_call_reply(message):
+    return TOOL_CALL_JSON_REFUSAL_RU if _looks_russian(message) else TOOL_CALL_JSON_REFUSAL_EN
+
+
+def _sanitize_tool_call_reply(reply, message):
+    text = (reply or "").strip()
+    if not text:
+        return reply
+    fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+    raw = fenced.group(1).strip() if fenced else text
+    parsed = None
+    if raw.startswith("{") and raw.endswith("}"):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+    if isinstance(parsed, dict):
+        keys = {str(k).lower() for k in parsed.keys()}
+        action = str(parsed.get("action") or parsed.get("function_call") or "").lower()
+        if {"action", "action_input"} & keys or "dalle" in action or "text2im" in action:
+            return _plain_tool_call_reply(message)
+    if re.search(r'"action"\s*:\s*"[^"]+"|"action_input"\s*:|"thought"\s*:', raw, re.IGNORECASE):
+        return _plain_tool_call_reply(message)
+    return reply
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -3545,6 +3713,20 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(200, {"reply": reply}, new_session)
             return
 
+        if _is_image_generation_request(message):
+            image, image_err = _call_gemini_image(message, attachments)
+            if image:
+                reply = "Generated image:"
+                if _looks_russian(message):
+                    reply = "Готово, сгенерировал картинку:"
+                _log_message(session_id, ip_hash, "assistant", reply, GEMINI_IMAGE_MODEL)
+                self._json(200, {"reply": reply, "images": [image]}, new_session)
+                return
+            reply = _image_generation_unavailable_reply(message, image_err)
+            _log_message(session_id, ip_hash, "assistant", reply, f"{GEMINI_IMAGE_MODEL}:unavailable")
+            self._json(200, {"reply": reply, "image_error": _err_code(image_err)}, new_session)
+            return
+
         reply, err = _call_model(model, SYSTEM_PROMPT, user_content, max_tok, history)
         if not reply or not reply.strip():
             _record_model_failure(model, err)
@@ -3574,9 +3756,10 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(502, {"error": _err_code(err) or "no_response", "reply": "Sorry, all AI models are temporarily unavailable. Please try again in a moment."}, new_session)
             return
 
-        _log_message(session_id, ip_hash, "assistant", reply.strip(), model["label"])
+        reply = _sanitize_tool_call_reply(reply.strip(), message)
+        _log_message(session_id, ip_hash, "assistant", reply, model["label"])
 
-        result = {"reply": reply.strip()}
+        result = {"reply": reply}
         if warning:
             result["warning"] = warning
         self._json(200, result, new_session)
