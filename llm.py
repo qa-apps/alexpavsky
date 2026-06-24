@@ -28,6 +28,7 @@ log = logging.getLogger("llm")
 
 
 # ── 1. PROVIDER CONFIG ───────────────────────────────────────────────────────
+# Endpoints and env-var key names for all 7 providers — secrets stay in the environment, never in the code.
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -79,6 +80,7 @@ def _provider_available(provider):
 
 
 # ── 2. MODEL REGISTRY ────────────────────────────────────────────────────────
+# The pool of ~30 models, each tagged with a size tier (S/M/H) and what it's good at (vision, coding, search).
 
 _STATIC_MODELS = [
     # Gemini
@@ -134,6 +136,7 @@ _rebuild_model_views(list(_STATIC_MODELS))
 
 
 # ── 3. INTENT CLASSIFICATION ─────────────────────────────────────────────────
+# Cheap regexes that guess what the user wants — small talk, code, web-search, or deep analysis — before any model is called.
 
 _SIMPLE = re.compile(
     r"^(?:hi|hello|hey|thanks|thank\s+you|ok|okay|yes|no|bye|how\s+are\s+you)$",
@@ -158,6 +161,7 @@ _COMPLEX = re.compile(
 
 
 # ── 4. HEALTH TRACKING ───────────────────────────────────────────────────────
+# Remembers which models just failed and why, and benches them for the right time (a minute for a blip, until tomorrow for a daily quota).
 
 MODEL_HEALTH = {}
 MODEL_HEALTH_LOCK = threading.Lock()
@@ -287,6 +291,7 @@ def _record_model_failure(model, err):
 
 
 # ── 5. ROUTING ───────────────────────────────────────────────────────────────
+# Picks the cheapest healthy model that fits the request, and builds a fallback chain that tries a different provider first.
 
 def _pick(candidates):
     """Weighted random choice among available candidates (newest-first bias)."""
@@ -363,6 +368,7 @@ def _max_tokens(tier):
 
 
 # ── 6. ATTACHMENT HANDLING ───────────────────────────────────────────────────
+# Cleans up uploaded files and images and packs the message into the shape each model expects.
 
 MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 12000
@@ -414,6 +420,7 @@ def _build_content(message, attachments, model_id):
 
 
 # ── 7. CALL LAYER ────────────────────────────────────────────────────────────
+# Sends the actual HTTP request to the chosen provider and normalizes every reply or error into one shape.
 
 def _content_to_gemini_parts(user_content):
     """Re-shape OpenAI content into Gemini {text}/{inline_data} parts."""
@@ -516,6 +523,7 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
 
 
 # ── 8. DEGRADED MODE ─────────────────────────────────────────────────────────
+# If every model is down, still answer simple greetings locally so the chat never looks dead.
 
 def _local_fallback_reply(message):
     """Handle trivial greetings when the whole pool is down."""
@@ -528,6 +536,7 @@ def _local_fallback_reply(message):
 
 
 # ── 9. PUBLIC ENTRY POINT ────────────────────────────────────────────────────
+# The one function the website calls: route → call → fall back → degrade, then return the reply.
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are the AI assistant on alexpavsky.com. Be concise, accurate, and "
