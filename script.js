@@ -88,27 +88,75 @@
     const YOUTUBE_FALLBACK_VIDEOS = [
         {
             source: 'Fireship',
-            title: 'Fireship rapid tech briefing',
-            link: 'https://www.youtube.com/watch?v=cuHDQhDhvPE',
-            date: '2026-03-27T12:00:00Z'
+            title: 'I read every major CS paper of the last 100 years',
+            link: 'https://www.youtube.com/watch?v=ML3q7Ok4hJg',
+            date: '2026-06-21T12:00:00Z'
         },
         {
-            source: 'Lex Fridman',
-            title: 'Lex Fridman AI conversation highlight',
+            source: 'Fireship',
+            title: 'The most trusted code on Earth is being rewritten in Rust',
+            link: 'https://www.youtube.com/watch?v=Sntj4HmuykI',
+            date: '2026-06-18T12:00:00Z'
+        },
+        {
+            source: 'Andrej Karpathy',
+            title: 'How I use LLMs',
+            link: 'https://www.youtube.com/watch?v=EWvNQjAaOHw',
+            date: '2026-06-16T12:00:00Z'
+        },
+        {
+            source: 'Andrej Karpathy',
+            title: 'Deep Dive into LLMs like ChatGPT',
             link: 'https://www.youtube.com/watch?v=7xTGNNLPyMI',
-            date: '2026-03-24T12:00:00Z'
+            date: '2025-02-05T12:00:00Z'
         },
         {
             source: '3Blue1Brown',
-            title: '3Blue1Brown intuitive math and machine learning visuals',
-            link: 'https://www.youtube.com/watch?v=aircAruvnKk',
-            date: '2026-03-20T12:00:00Z'
+            title: 'Measuring the entropy of English',
+            link: 'https://www.youtube.com/watch?v=-7etvZSBxlk',
+            date: '2026-06-12T12:00:00Z'
+        },
+        {
+            source: '3Blue1Brown',
+            title: "What's the perfect encoding? How do you know?",
+            link: 'https://www.youtube.com/watch?v=7L_eTem1SQ4',
+            date: '2026-06-08T12:00:00Z'
         },
         {
             source: 'Computerphile',
-            title: 'Computerphile deep dive into practical computing concepts',
-            link: 'https://www.youtube.com/watch?v=SzJ46YA_RaA',
-            date: '2026-03-18T12:00:00Z'
+            title: "TCP b: Additive Increase Multiplicative Decrease and Slow Start",
+            link: 'https://www.youtube.com/watch?v=nKVML4YaBqs',
+            date: '2026-06-07T12:00:00Z'
+        },
+        {
+            source: 'Computerphile',
+            title: 'TCP a: Ensuring your data gets there in the right order',
+            link: 'https://www.youtube.com/watch?v=IADOV8UZO34',
+            date: '2026-06-03T12:00:00Z'
+        },
+        {
+            source: 'Two Minute Papers',
+            title: "DeepSeek just solved AI's billion dollar problem",
+            link: 'https://www.youtube.com/watch?v=mG4SmhWyeFA',
+            date: '2026-06-01T12:00:00Z'
+        },
+        {
+            source: 'Two Minute Papers',
+            title: 'Scientists found a better language for AI agents',
+            link: 'https://www.youtube.com/watch?v=dUmT0OIGoqE',
+            date: '2026-05-29T12:00:00Z'
+        },
+        {
+            source: 'Google DeepMind',
+            title: 'When millions of AI agents meet',
+            link: 'https://www.youtube.com/watch?v=V04bm-3d6EQ',
+            date: '2026-05-22T12:00:00Z'
+        },
+        {
+            source: 'OpenAI',
+            title: 'ChatGPT Futures, Class of 2026',
+            link: 'https://www.youtube.com/watch?v=mVpCDzoNtxA',
+            date: '2026-05-18T12:00:00Z'
         }
     ];
     // Live YouTube sources are disabled: /api/youtube is not implemented on the

@@ -1,28 +1,17 @@
 """
 llm.py — Multi-provider LLM orchestration layer (showcase extract)
-==================================================================
 
-Standalone, self-contained extract of the LLM orchestration behind the AI chat
-on alexpavsky.com. NOT wired into the running server — a clean reference for the
-design.
+Standalone extract of the AI chat orchestration on alexpavsky.com.
+~30 free-tier models across 7 providers (Groq, OpenRouter, Gemini,
+Hugging Face, Cerebras, SambaNova, Mistral). One reliable generate()
+built on:
 
-It serves answers from a pool of ~30 free-tier models across 7 providers (Groq,
-OpenRouter, Gemini, Hugging Face, Cerebras, SambaNova, Mistral). Free tiers fail
-constantly and differently (rate limits, daily quotas, credit resets, vanished
-models), so a single dependable `generate()` is built on four ideas:
+  1. INTENT ROUTING   — cheapest tier that fits the request.
+  2. HEALTH TRACKING  — cool down the right scope for the right duration.
+  3. FALLBACK CHAINS  — retry a different provider before giving up.
+  4. GRACEFUL DEGRADE — answer trivially if the whole pool is down.
 
-  1. INTENT ROUTING   — classify the request and pick the cheapest tier that
-                        fits; don't send "hi" to a 405B model.
-  2. HEALTH TRACKING  — on failure, read the HTTP response and cool down the
-                        right scope (model / provider / free pool) for the right
-                        duration (90s blip → until next UTC midnight for a quota).
-  3. FALLBACK CHAINS  — retry a *different provider* first, so one outage doesn't
-                        cascade through every model behind it.
-  4. GRACEFUL DEGRADE — if the whole pool is down, answer trivial messages
-                        locally instead of erroring.
-
-Reads provider keys from the same env vars as production (GROQ_API_KEY, …); with
-no keys it still imports and routes, only network calls return "missing key".
+Reads provider keys from env (GROQ_API_KEY, …); works without keys.
 """
 
 from __future__ import annotations
