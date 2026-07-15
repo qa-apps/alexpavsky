@@ -704,6 +704,48 @@
         return tmp.textContent || tmp.innerText || '';
     }
 
+    var LATIN_NON_ENGLISH_STOPWORDS = {
+        adalah: true, agar: true, akan: true, atau: true, banyak: true,
+        bukan: true, dalam: true, dan: true, dari: true, dengan: true,
+        di: true, ini: true, itu: true, jadi: true, kalau: true,
+        karena: true, kerja: true, lebih: true, mana: true, menang: true,
+        mereka: true, paling: true, pada: true, saya: true, sebagai: true,
+        sebuah: true, semua: true, tidak: true, untuk: true, yang: true
+    };
+    var ENGLISH_STOPWORDS = {
+        a: true, about: true, after: true, ai: true, and: true, are: true,
+        as: true, at: true, be: true, by: true, for: true, from: true,
+        how: true, in: true, into: true, is: true, it: true, of: true,
+        on: true, or: true, the: true, this: true, to: true, with: true,
+        what: true, when: true, why: true, you: true, your: true
+    };
+    var NON_ENGLISH_SCRIPT_RE = /[\u0370-\u03ff\u0400-\u052f\u0590-\u05ff\u0600-\u06ff\u0900-\u0dff\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+    var VIETNAMESE_LETTERS_RE = /[ăâđêôơưĂÂĐÊÔƠƯ]/;
+
+    function isLikelyEnglishFeedArticle(article) {
+        var text = [
+            article && article.title,
+            stripHtml((article && article.description) || '')
+        ].join(' ');
+        if (!text.trim()) return true;
+        if (NON_ENGLISH_SCRIPT_RE.test(text) || VIETNAMESE_LETTERS_RE.test(text)) return false;
+        var words = (text.toLowerCase().match(/[a-z][a-z']*/g) || []).map(function (word) {
+            return word.replace(/^'+|'+$/g, '');
+        });
+        if (!words.length) return true;
+        var nonEnglishHits = 0;
+        var englishHits = 0;
+        words.forEach(function (word) {
+            if (LATIN_NON_ENGLISH_STOPWORDS[word]) nonEnglishHits += 1;
+            if (ENGLISH_STOPWORDS[word]) englishHits += 1;
+        });
+        if (nonEnglishHits >= 3) {
+            var ratio = nonEnglishHits / Math.max(1, words.length);
+            if (englishHits < 3 || ratio >= 0.18) return false;
+        }
+        return true;
+    }
+
     // Hosts whose articles do not render as a clean reader view inside the in-page Live
     // Feed modal — the publisher blocks embedding, or the reader output is an image/avatar
     // dump rather than readable text. Items from these sources are kept out of the feed so
@@ -759,7 +801,7 @@
 
     function filterPreviewableFeedArticles(articles) {
         return (articles || []).filter(function (article) {
-            return article && !isBlockedPreviewArticle(article);
+            return article && isLikelyEnglishFeedArticle(article) && !isBlockedPreviewArticle(article);
         });
     }
 
@@ -1454,7 +1496,7 @@
             var thumb = thumbCandidates[0] || v.thumb || '';
             return '<a class="yt-card" href="' + escapeHtml(v.link) + '" target="_blank" rel="noopener" data-video-id="' + escapeHtml(videoId) + '">' +
                 '<div class="yt-card-thumb">' +
-                    '<img src="' + escapeHtml(thumb) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-thumb-index="0" data-thumb-candidates="' + escapeHtml(thumbCandidates.join('|')) + '">' +
+                    '<img src="' + escapeHtml(thumb) + '" alt="" loading="eager" decoding="async" fetchpriority="low" referrerpolicy="no-referrer" data-thumb-index="0" data-thumb-candidates="' + escapeHtml(thumbCandidates.join('|')) + '">' +
                     '<div class="yt-card-play"><i class="fas fa-play"></i></div>' +
                 '</div>' +
                 '<div class="yt-card-info">' +
@@ -3776,15 +3818,36 @@
             return text;
         }
 
+        function normalizeGeneratedImage(image) {
+            var candidate = '';
+            var alt = 'Generated image';
+            if (typeof image === 'string') {
+                candidate = image.trim();
+            } else if (image && typeof image === 'object') {
+                if (typeof image.alt === 'string' && image.alt.trim()) alt = image.alt.trim();
+                if (typeof image.data_url === 'string') candidate = image.data_url.trim();
+                else if (typeof image.url === 'string') candidate = image.url.trim();
+                else if (typeof image.src === 'string') candidate = image.src.trim();
+            }
+            if (!candidate) return null;
+            if (/^data:image\/(?:jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(candidate)) {
+                return { src: candidate, alt: alt };
+            }
+            try {
+                var parsed = new URL(candidate, window.location.href);
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                    return { src: parsed.href, alt: alt };
+                }
+            } catch (_) {}
+            return null;
+        }
+
         function renderBotImages(images) {
-            var safeImages = (images || []).filter(function (image) {
-                var url = image && typeof image.data_url === 'string' ? image.data_url : '';
-                return /^data:image\/(?:jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(url);
-            });
+            var safeImages = (images || []).map(normalizeGeneratedImage).filter(Boolean);
             if (!safeImages.length) return '';
             return '<div class="chat-generated-images">' + safeImages.map(function (image) {
                 return '<figure class="chat-generated-image">' +
-                    '<img src="' + escapeHtml(image.data_url) + '" alt="' + escapeHtml(image.alt || 'Generated image') + '" loading="lazy">' +
+                    '<img src="' + escapeHtml(image.src) + '" alt="' + escapeHtml(image.alt || 'Generated image') + '" loading="lazy">' +
                 '</figure>';
             }).join('') + '</div>';
         }
@@ -4538,7 +4601,7 @@
         // bounces between pages.
         var LIVE_RAIL_CAP = 15;
         var LIVE_RAIL_TTL_MS = 3 * 24 * 60 * 60 * 1000;
-        var LIVE_RAIL_CACHE_KEY = 'alexpavsky_live_rail_v1';
+        var LIVE_RAIL_CACHE_KEY = 'alexpavsky_live_rail_v2';
 
         function readLiveRailCache() {
             try {
@@ -4547,14 +4610,17 @@
                 var parsed = JSON.parse(raw);
                 if (!parsed || !Array.isArray(parsed.items) || !parsed.items.length) return null;
                 if (Date.now() - (parsed.ts || 0) > LIVE_RAIL_TTL_MS) return null;
-                return parsed.items;
+                var filtered = filterPreviewableFeedArticles(parsed.items);
+                return filtered.length ? filtered : null;
             } catch (e) { return null; }
         }
         function writeLiveRailCache(items) {
             try {
+                items = filterPreviewableFeedArticles(items);
                 localStorage.setItem(LIVE_RAIL_CACHE_KEY, JSON.stringify({
                     ts: Date.now(), items: items
                 }));
+                localStorage.removeItem('alexpavsky_live_rail_v1');
             } catch (e) { /* quota or private mode — ignore */ }
         }
 
@@ -4572,7 +4638,8 @@
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (data) {
                     if (!data || !Array.isArray(data.articles) || !data.articles.length) return;
-                    var fresh = data.articles.slice(0, LIVE_RAIL_CAP);
+                    var fresh = filterPreviewableFeedArticles(data.articles).slice(0, LIVE_RAIL_CAP);
+                    if (!fresh.length) return;
                     renderTrack(fresh);
                     writeLiveRailCache(fresh);
                     offset = 0;

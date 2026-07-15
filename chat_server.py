@@ -721,6 +721,8 @@ def _sync_dynamic_models():
             pricing = m.get("pricing", {})
             if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
                 m_id = m.get("id", "")
+                if not m_id.endswith(":free"):
+                    continue
                 m_name = m.get("name", "")
                 lower_id = m_id.lower()
                 lower_name = m_name.lower()
@@ -1583,6 +1585,23 @@ _NON_ENGLISH_SCRIPT_RE = re.compile(
 # Letters that uniquely identify Vietnamese (not used by any major Western European language)
 _VIETNAMESE_LETTERS_RE = re.compile(r"[ăâđêôơưĂÂĐÊÔƠƯ]")
 
+_LATIN_NON_ENGLISH_STOPWORDS = {
+    # Indonesian / Malay. This exact family caused non-English Dev.to items
+    # to leak into Live Alerts while passing the script/diacritic guard.
+    "adalah", "agar", "akan", "atau", "banyak", "bukan", "dalam", "dan",
+    "dari", "dengan", "di", "ini", "itu", "jadi", "kalau", "karena",
+    "kerja", "lebih", "mana", "menang", "mereka", "paling", "pada",
+    "saya", "sebagai", "sebuah", "semua", "tidak", "untuk", "yang",
+}
+
+_ENGLISH_STOPWORDS = {
+    "a", "about", "after", "ai", "and", "are", "as", "at", "be", "by",
+    "for", "from", "how", "in", "into", "is", "it", "of", "on", "or",
+    "the", "this", "to", "with", "what", "when", "why", "you", "your",
+}
+
+_FEED_WORD_RE = re.compile(r"[a-z][a-z']*", re.IGNORECASE)
+
 
 def _feed_is_english(title, description=""):
     text = (title or "") + " " + (description or "")
@@ -1592,6 +1611,15 @@ def _feed_is_english(title, description=""):
         return False
     if _VIETNAMESE_LETTERS_RE.search(text):
         return False
+    words = [w.lower().strip("'") for w in _FEED_WORD_RE.findall(text)]
+    if not words:
+        return True
+    non_english_hits = [w for w in words if w in _LATIN_NON_ENGLISH_STOPWORDS]
+    if len(non_english_hits) >= 3:
+        english_hits = sum(1 for w in words if w in _ENGLISH_STOPWORDS)
+        non_english_ratio = len(non_english_hits) / max(1, len(words))
+        if english_hits < 3 or non_english_ratio >= 0.18:
+            return False
     return True
 
 
@@ -2109,7 +2137,6 @@ def _article_render_reader(html_text, source_url, theme):
     accent = "#7dd3fc" if theme == "dark" else "#0369a1"
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<base href="{html_escape(source_url)}">
 <title>{html_escape(title)}</title>
 <style>
   body {{ margin:0; padding:24px 28px; background:{bg}; color:{fg};
@@ -2611,6 +2638,53 @@ def _clean(val, limit):
     return val.strip()[:limit] if isinstance(val, str) else ""
 
 
+FORUM_TEST_TAG_RE = re.compile(r"\s*\[tag:[a-z0-9][a-z0-9-]{2,80}\]\s*", re.IGNORECASE)
+FORUM_BOOKMARK_SPAM_RE = re.compile(r"\bbookmar\w*\b", re.IGNORECASE)
+FORUM_RECENT_14D_LIMIT = 3
+FORUM_RECENT_30D_LIMIT = 6
+FORUM_RECENT_14D_SECONDS = 14 * 24 * 60 * 60
+FORUM_RECENT_30D_SECONDS = 30 * 24 * 60 * 60
+
+
+def _clean_forum_text(text):
+    cleaned = FORUM_TEST_TAG_RE.sub(" ", text or "")
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
+def _forum_visible_text_key(text):
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+
+def _forum_take_visible_entry(row, seen_texts, counters, now_ts):
+    text = _clean_forum_text(row["text"])
+    if not text or FORUM_BOOKMARK_SPAM_RE.search(text):
+        return None
+
+    text_key = _forum_visible_text_key(text)
+    if not text_key or text_key in seen_texts:
+        return None
+
+    created_at = float(row["created_at"] or 0)
+    age_seconds = now_ts - created_at if created_at else FORUM_RECENT_30D_SECONDS + 1
+    if age_seconds <= FORUM_RECENT_14D_SECONDS and counters["recent_14d"] >= FORUM_RECENT_14D_LIMIT:
+        return None
+    if age_seconds <= FORUM_RECENT_30D_SECONDS and counters["recent_30d"] >= FORUM_RECENT_30D_LIMIT:
+        return None
+
+    seen_texts.add(text_key)
+    if age_seconds <= FORUM_RECENT_14D_SECONDS:
+        counters["recent_14d"] += 1
+    if age_seconds <= FORUM_RECENT_30D_SECONDS:
+        counters["recent_30d"] += 1
+
+    return {
+        "id": row["id"],
+        "user_name": row["user_name"],
+        "text": text,
+        "created_at": row["created_at"],
+    }
+
+
 def _extract_docx_text(data_url: str, max_chars: int = 8000) -> str:
     try:
         raw = data_url.split(",", 1)[1] if "," in data_url else data_url
@@ -2744,6 +2818,8 @@ def _extract_reply(data):
 
 def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
     provider = model.get("provider", "groq")
+    if provider == "openrouter" and not str(model.get("id", "")).endswith(":free"):
+        return None, {"code": "openrouter_paid_disabled", "provider": provider, "model": model.get("id")}
     api_key = _provider_api_key(provider)
     if not api_key:
         return None, f"missing_{provider}_key"
@@ -3484,15 +3560,25 @@ class Handler(SimpleHTTPRequestHandler):
                 "SELECT id, user_name, text, created_at FROM forum_posts WHERE parent_id IS NULL ORDER BY created_at DESC LIMIT 50"
             ).fetchall()
             posts = []
+            visible_seen = set()
+            visible_counters = {"recent_14d": 0, "recent_30d": 0}
+            now_ts = time.time()
             for r in top:
+                post_entry = _forum_take_visible_entry(r, visible_seen, visible_counters, now_ts)
+                if not post_entry:
+                    continue
                 replies = conn.execute(
                     "SELECT id, user_name, text, created_at FROM forum_posts WHERE parent_id = ? ORDER BY created_at ASC LIMIT 50",
                     (r["id"],)
                 ).fetchall()
-                posts.append({
-                    "id": r["id"], "user_name": r["user_name"], "text": r["text"], "created_at": r["created_at"],
-                    "replies": [{"id": rr["id"], "user_name": rr["user_name"], "text": rr["text"], "created_at": rr["created_at"]} for rr in replies]
-                })
+                post_entry["replies"] = [
+                    reply_entry
+                    for reply_entry in (
+                        _forum_take_visible_entry(rr, visible_seen, visible_counters, now_ts) for rr in replies
+                    )
+                    if reply_entry
+                ]
+                posts.append(post_entry)
             conn.close()
             self._json(200, {"posts": posts})
             return
@@ -3886,7 +3972,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(400, {"error": "invalid_json"})
             return
 
-        text = (body.get("text") or "").strip()
+        text = _clean_forum_text(body.get("text") or "")
         handle = (body.get("handle") or "").strip().lower()
         parent_id = body.get("parent_id") or None
 

@@ -474,6 +474,8 @@ def _extract_reply(data):
 def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
     """Dispatch one completion. Returns (reply, None) or (None, err_dict)."""
     provider = model.get("provider", "groq")
+    if provider == "openrouter" and not str(model.get("id", "")).endswith(":free"):
+        return None, {"code": "openrouter_paid_disabled", "provider": provider, "model": model.get("id")}
     api_key = _provider_api_key(provider)
     if not api_key:
         return None, f"missing_{provider}_key"
