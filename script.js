@@ -430,9 +430,7 @@
     }
 
     function stripHtml(html) {
-        var tmp = document.createElement('div');
-        tmp.innerHTML = html;
-        return tmp.textContent || tmp.innerText || '';
+        return new DOMParser().parseFromString(html || '', 'text/html').body.textContent || '';
     }
 
     function parseXmlFeed(xmlText, source) {
@@ -699,9 +697,7 @@
     }
 
     function stripHtml(html) {
-        var tmp = document.createElement('DIV');
-        tmp.innerHTML = html || '';
-        return tmp.textContent || tmp.innerText || '';
+        return new DOMParser().parseFromString(html || '', 'text/html').body.textContent || '';
     }
 
     var LATIN_NON_ENGLISH_STOPWORDS = {
