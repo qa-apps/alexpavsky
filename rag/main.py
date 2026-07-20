@@ -25,7 +25,6 @@ import psycopg2.extras
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -44,16 +43,15 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 DATABASE_URL = os.environ["DATABASE_URL"]
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # Embeddings: local sentence-transformers (no API key needed)
-# Generation: OpenRouter (already configured with key rotation)
+# Generation: free-tier provider pool only.
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBED_DIM = 384
-USE_OPENAI_EMBED = bool(OPENAI_API_KEY)  # fallback to OpenAI if key provided
+USE_OPENAI_EMBED = False
 LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"  # via OpenRouter free tier
 QDRANT_COLLECTION = "documents"
 CHUNK_TOKENS = 500
@@ -72,7 +70,7 @@ log = logging.getLogger("rag-api")
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if USE_OPENAI_EMBED else None
+openai_client = None
 
 # Local sentence-transformers model (loaded once at startup)
 _st_model = None

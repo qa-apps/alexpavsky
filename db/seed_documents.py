@@ -77,16 +77,7 @@ def main():
         print("\nERROR: Start Docker first: docker compose up -d")
         sys.exit(1)
 
-    # Check embedding keys
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    hf_token = os.environ.get("HF_TOKEN", "")
-    if openai_key:
-        print("  Embeddings: OpenAI text-embedding-3-small")
-    elif hf_token:
-        print("  Embeddings: HuggingFace all-MiniLM-L6-v2 (free)")
-    else:
-        print("\nERROR: Set OPENAI_API_KEY or HF_TOKEN in .env")
-        sys.exit(1)
+    print("  Embeddings: local sentence-transformers all-MiniLM-L6-v2")
 
     print(f"\nUploading {len(DOCUMENTS)} documents...\n")
 
