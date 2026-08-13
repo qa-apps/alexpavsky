@@ -3362,18 +3362,7 @@
             });
         }
 
-        // Chat teaser + notification dot
-        var chatTeaser = document.getElementById('chat-teaser');
-        var chatTeaserClose = document.getElementById('chat-teaser-close');
-        var chatNotifDot = chatToggle.querySelector('.chat-notification-dot');
-        function dismissTeaser() {
-            if (chatTeaser) chatTeaser.classList.add('hidden');
-            if (chatNotifDot) chatNotifDot.style.display = 'none';
-        }
-        if (chatTeaserClose) chatTeaserClose.addEventListener('click', function (e) { e.stopPropagation(); dismissTeaser(); });
-
         function openChat(focusInput) {
-            dismissTeaser();
             if (isOpen) { if (focusInput) chatInput.focus(); return; }
             isOpen = true;
             chatWindow.classList.add('active');
