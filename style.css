@@ -85,14 +85,6 @@ body.light-mode .tag { background: rgba(124, 58, 237, 0.06); border-color: rgba(
 body.light-mode .chat-avatar { background: rgba(124, 58, 237, 0.15); }
 body.light-mode .chat-header-btn:hover,
 body.light-mode .chat-close-btn:hover { background: rgba(0, 0, 0, 0.08); }
-body.light-mode .chat-teaser {
-    background: linear-gradient(135deg, #fff, #f5f3ef);
-    border-color: rgba(99,102,241,0.2);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.1);
-}
-body.light-mode .chat-teaser-text { color: #2a2a35; }
-body.light-mode .chat-teaser-close { color: #8a8a95; }
-body.light-mode .chat-teaser-close:hover { color: #2a2a35; }
 body.light-mode .chat-messages { background: var(--bg-primary); }
 body.light-mode .message-content { background: var(--bg-card); color: #2a2a35; }
 body.light-mode .user-message .message-content { background: var(--accent); color: #fff; }
@@ -3701,75 +3693,6 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
     position: absolute; top: -4px; right: -4px; background: var(--success);
     color: #fff; font-size: 0.55rem; font-weight: 700; padding: 2px 6px;
     border-radius: 999px; border: 2px solid var(--bg-primary);
-}
-
-/* Notification dot */
-.chat-notification-dot {
-    position: absolute;
-    top: -6px;
-    left: -6px;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: #ef4444;
-    color: #fff;
-    font-size: 0.65rem;
-    font-weight: 800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 2px solid var(--bg-primary);
-    animation: notifPulse 2s ease-in-out infinite;
-    z-index: 2;
-}
-@keyframes notifPulse {
-    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
-    50% { transform: scale(1.15); box-shadow: 0 0 0 8px rgba(239,68,68,0); }
-}
-
-/* Chat teaser bubble */
-.chat-teaser {
-    position: absolute;
-    bottom: 70px;
-    right: 0;
-    width: 260px;
-    background: linear-gradient(135deg, #1e293b, #1a2332);
-    border: 1px solid rgba(239,68,68,0.3);
-    border-radius: 14px 14px 4px 14px;
-    padding: 0.75rem 1rem;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
-    animation: teaserSlideIn 0.5s ease 2s both;
-    z-index: 1;
-}
-@keyframes teaserSlideIn {
-    from { opacity: 0; transform: translateY(10px) scale(0.95); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.chat-teaser-text {
-    font-size: 0.8rem;
-    line-height: 1.45;
-    color: var(--text-primary);
-}
-.chat-teaser-close {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    font-size: 1rem;
-    cursor: pointer;
-    padding: 2px;
-    line-height: 1;
-}
-.chat-teaser-close:hover { color: var(--text-primary); }
-.chat-teaser.hidden { display: none; }
-
-/* On narrow screens the teaser bubble was sitting on top of primary CTAs
-   (Live Feed / AI Lab hero buttons, Run Analysis on RAG card). Hide it on
-   phones — the chat-toggle button alone is enough discoverability there. */
-@media (max-width: 768px) {
-    .chat-teaser { display: none !important; }
 }
 
 .chat-window {
