@@ -440,7 +440,7 @@
                     <h4>Playwright</h4>
                     <p>E2E test automation</p>
                 </a>
-                <a href="https://www.confident-ai.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
+                <a href="https://deepeval.com/" target="_blank" rel="noopener" class="tool-card" data-animate>
                     <div class="tool-icon tool-icon-badge" style="--tool-accent:#6366f1"><i class="fas fa-chart-bar"></i></div>
                     <h4>DeepEval</h4>
                     <p>LLM testing metrics</p>
@@ -775,7 +775,7 @@
                     <div class="chat-avatar"><i class="fas fa-robot"></i></div>
                     <div>
                         <h4>AI Assistant</h4>
-                        <span class="chat-status"><span class="status-dot"></span> Online</span>
+                        <span class="chat-status" id="chat-status"><span class="status-dot" id="chat-status-dot"></span><span id="chat-status-text">Checking...</span></span>
                     </div>
                 </div>
                 <div class="chat-header-actions">
@@ -906,7 +906,7 @@
                 </div>
                 <div class="auth-field">
                     <label for="login-password">Password</label>
-                    <input type="password" id="login-password" required placeholder="Your password" minlength="6" autocomplete="current-password">
+                    <input type="password" id="login-password" required placeholder="Your password" minlength="10" autocomplete="current-password">
                 </div>
                 <div class="auth-error" id="login-error"></div>
                 <button type="submit" class="auth-submit">Login</button>
@@ -927,7 +927,7 @@
                 <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;">Enter your new password.</p>
                 <div class="auth-field">
                     <label for="reset-password">New password</label>
-                    <input type="password" id="reset-password" required placeholder="Min 6 characters" minlength="6" autocomplete="new-password">
+                    <input type="password" id="reset-password" required placeholder="Min 10 characters" minlength="10" autocomplete="new-password">
                 </div>
                 <div class="auth-error" id="reset-error"></div>
                 <div class="auth-success" id="reset-success"></div>
@@ -944,11 +944,11 @@
                 </div>
                 <div class="auth-field">
                     <label for="reg-password">Password</label>
-                    <input type="password" id="reg-password" required placeholder="Min 6 characters" minlength="6" autocomplete="new-password">
+                    <input type="password" id="reg-password" required placeholder="Min 10 characters" minlength="10" autocomplete="new-password">
                 </div>
                 <div class="auth-field">
                     <label for="reg-password2">Confirm Password</label>
-                    <input type="password" id="reg-password2" required placeholder="Repeat password" minlength="6" autocomplete="new-password">
+                    <input type="password" id="reg-password2" required placeholder="Repeat password" minlength="10" autocomplete="new-password">
                 </div>
                 <div class="auth-error" id="register-error"></div>
                 <button type="submit" class="auth-submit">Create Account</button>
@@ -1158,6 +1158,17 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260702-youtube-forum"></script>
+    <!-- Voice Agent — local $0 voice pipeline (STT + RAG brain + Kokoro TTS), same-origin via nginx /voice-api/.
+         Self-contained Shadow-DOM widget: a pure voice-only orb (no chat) that sits to the LEFT of the
+         text-chat FAB (right:100/bottom:58 aligns its orb centre with the 64px chat FAB at right:20/bottom:56,
+         16px gap) so the two launchers read as a symmetric pair and it no longer covers the chat teaser.
+         Uses blob-URL audio so the site CSP (media-src 'self' blob:) is untouched. -->
+    <script>
+      window.VOICE_AGENT_API = '/voice-api';
+      window.VOICE_AGENT_POS = { right: 100, bottom: 58 };
+    </script>
+    <script src="/voice-api/widget.js" defer></script>
+
+    <script src="script.js?v=20260720-sec-cookies"></script>
 </body>
 </html>

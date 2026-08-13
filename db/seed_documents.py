@@ -106,7 +106,7 @@ def main():
     ok = sum(1 for r in results if r["status"] == "ok")
     total_chunks = sum(r.get("chunks", 0) for r in results if r["status"] == "ok")
     print(f"  Uploaded:     {ok}/{len(DOCUMENTS)} documents")
-    print(f"  Total chunks: {total_chunks} (stored in pgvector + Qdrant)")
+    print(f"  Total chunks: {total_chunks} (stored in Qdrant)")
     print()
     print("Test RAG query:")
     print('  curl -X POST http://localhost:8001/api/rag/query \\')

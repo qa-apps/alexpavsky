@@ -14,6 +14,7 @@ import io
 import logging
 import os
 import textwrap
+import time
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ import psycopg2.extras
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -43,15 +45,16 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 DATABASE_URL = os.environ["DATABASE_URL"]
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # Embeddings: local sentence-transformers (no API key needed)
-# Generation: free-tier provider pool only.
+# Generation: OpenRouter (already configured with key rotation)
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBED_DIM = 384
-USE_OPENAI_EMBED = False
+USE_OPENAI_EMBED = bool(OPENAI_API_KEY)  # fallback to OpenAI if key provided
 LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"  # via OpenRouter free tier
 QDRANT_COLLECTION = "documents"
 CHUNK_TOKENS = 500
@@ -70,7 +73,7 @@ log = logging.getLogger("rag-api")
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
-openai_client = None
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if USE_OPENAI_EMBED else None
 
 # Local sentence-transformers model (loaded once at startup)
 _st_model = None
@@ -198,24 +201,96 @@ def extract_text(data: bytes, filename: str) -> str:
 
 # Provider pool for LLM generation — each provider tried in order on failure.
 # All speak the OpenAI chat-completions wire format, so one POST helper works.
+#
+# tier column:
+#   "free"    — free-tier only (no OpenRouter credits)
+#   "credits" — bills OpenRouter account credits (same OPENROUTER_API_KEY)
+#   "blocked" — never call (paid non-OR or broken free)
+#
+# IMPORTANT: OpenRouter free models and paid models share ONE API key, but
+# separate rate-limit pools. Cooldown is keyed by (key_env, tier) so a free
+# :free 429 does NOT block paid credit models on the same key.
+#
+# Order: cheap OpenRouter paid (credits) first for voice reliability, then
+# independent free buckets (Cerebras/Groq), then OpenRouter :free.
 _LLM_PROVIDERS = [
-    ("groq",       "GROQ_API_KEY",       "https://api.groq.com/openai/v1",       "llama-3.3-70b-versatile"),
-    ("cerebras",   "CEREBRAS_API_KEY",   "https://api.cerebras.ai/v1",           "llama-3.3-70b"),
-    ("sambanova",  "SAMBANOVA_API_KEY",  "https://api.sambanova.ai/v1",          "Meta-Llama-3.3-70B-Instruct"),
-    ("mistral",    "MISTRAL_API_KEY",    "https://api.mistral.ai/v1",            "mistral-small-latest"),
-    ("or-llama",   "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",         "meta-llama/llama-3.3-70b-instruct:free"),
-    ("or-deepseek","OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",         "deepseek/deepseek-r1-0528:free"),
-    ("or-qwen",    "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",         "qwen/qwen3-coder:free"),
-    ("hf-router",  "HF_TOKEN",           "https://router.huggingface.co/v1",     "meta-llama/Llama-3.3-70B-Instruct:cerebras"),
+    # --- OpenRouter PAID (uses $ credits; same key as free) — prefer for voice ---
+    ("or-qwen7",   "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "qwen/qwen-2.5-7b-instruct",              "credits"),
+    ("or-4o-mini", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini",                      "credits"),
+    ("or-llama70", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct",       "credits"),
+    # --- Independent free buckets ---
+    ("cerebras",   "CEREBRAS_API_KEY",   "https://api.cerebras.ai/v1",   "gpt-oss-120b",                            "free"),
+    ("cerebras-g", "CEREBRAS_API_KEY",   "https://api.cerebras.ai/v1",   "gemma-4-31b",                             "free"),
+    ("groq",       "GROQ_API_KEY",       "https://api.groq.com/openai/v1","llama-3.3-70b-versatile",                 "free"),
+    ("groq-8b",    "GROQ_API_KEY",       "https://api.groq.com/openai/v1","llama-3.1-8b-instant",                    "free"),
+    # --- OpenRouter free (rate-limited hard; same key, separate pool) ---
+    ("or-gemma26", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "google/gemma-4-26b-a4b-it:free",          "free"),
+    ("or-gemma31", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "google/gemma-4-31b-it:free",              "free"),
+    ("or-nemotron","OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "nvidia/nemotron-3-super-120b-a12b:free",  "free"),
+    # --- Blocked ---
+    ("sambanova",  "SAMBANOVA_API_KEY",  "https://api.sambanova.ai/v1",  "Meta-Llama-3.3-70B-Instruct",             "blocked"),
+    ("mistral",    "MISTRAL_API_KEY",    "https://api.mistral.ai/v1",    "mistral-small-latest",                    "blocked"),
 ]
 
+# OPENROUTER_USE_CREDITS=1 (default) allows "credits" tier models against the
+# OpenRouter balance (~$9+). Set 0 to force free-only again.
+OPENROUTER_USE_CREDITS = os.environ.get("OPENROUTER_USE_CREDITS", "1").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+# Escape hatch: allow any non-blocked paid row (including non-OpenRouter).
+RAG_ALLOW_PAID = os.environ.get("RAG_ALLOW_PAID", "0").strip().lower() in ("1", "true", "yes")
 
-def call_llm(prompt: str, system: str = "") -> str:
-    """Call LLM with rotation across all available providers.
+# Cooldown keyed by rate-limit bucket id (not raw key alone).
+_PROVIDER_COOLDOWN = {}  # bucket_id -> unix ts until usable
+_COOLDOWN_SECONDS = float(os.environ.get("LLM_COOLDOWN_SECONDS", "60"))
 
-    Tries each provider in _LLM_PROVIDERS order; switches to the next on any
-    non-200 response or exception. Returns a fallback string only if every
-    provider fails.
+
+def _normalize_tier(tier) -> str:
+    """Accept legacy bool free flags and new tier strings."""
+    if tier is True:
+        return "free"
+    if tier is False:
+        return "blocked"
+    t = str(tier or "blocked").strip().lower()
+    if t in ("free", "credits", "blocked", "paid"):
+        return "credits" if t == "paid" else t
+    if str(tier).endswith(":free"):
+        return "free"
+    return "blocked"
+
+
+def _bucket_id(key_env: str, tier: str) -> str:
+    """OpenRouter free vs credits are separate rate-limit pools on one key."""
+    tier = _normalize_tier(tier)
+    if key_env == "OPENROUTER_API_KEY":
+        return f"{key_env}:{tier}"
+    return key_env
+
+
+def _is_allowed(model: str, tier) -> bool:
+    tier = _normalize_tier(tier)
+    if tier == "free" or str(model).endswith(":free"):
+        return True
+    if tier == "credits" and OPENROUTER_USE_CREDITS:
+        return True
+    if RAG_ALLOW_PAID and tier != "blocked":
+        return True
+    return False
+
+
+def _cool_bucket(bucket_id: str, seconds: float = None) -> None:
+    until = time.time() + (seconds if seconds is not None else _COOLDOWN_SECONDS)
+    prev = _PROVIDER_COOLDOWN.get(bucket_id, 0.0)
+    if until > prev:
+        _PROVIDER_COOLDOWN[bucket_id] = until
+        log.info("llm_bucket_cooldown bucket=%s for=%.0fs", bucket_id, until - time.time())
+
+
+def call_llm(prompt: str, system: str = "", max_tokens: int = 1024, timeout: float = 20.0) -> str:
+    """Call LLM with rotation across free + OpenRouter credit providers.
+
+    Cooldown is per rate-limit bucket: Groq key, Cerebras key, OpenRouter:free,
+    OpenRouter:credits. A free-tier 429 does not block paid credit models.
     """
     messages = []
     if system:
@@ -223,27 +298,59 @@ def call_llm(prompt: str, system: str = "") -> str:
     messages.append({"role": "user", "content": prompt})
 
     last_error = None
-    for name, key_env, base_url, model in _LLM_PROVIDERS:
-        key = os.environ.get(key_env, "").strip()
-        if not key:
+    for force_all in (False, True):
+        seen_buckets = set()
+        now = time.time()
+        providers = []
+        for row in _LLM_PROVIDERS:
+            name, key_env, base_url, model, tier = row
+            tier_n = _normalize_tier(tier)
+            bid = _bucket_id(key_env, tier_n)
+            if not force_all and _PROVIDER_COOLDOWN.get(bid, 0.0) > now:
+                continue
+            providers.append(row)
+        if not providers:
             continue
-        try:
-            r = httpx.post(
-                f"{base_url}/chat/completions",
-                json={"model": model, "messages": messages, "max_tokens": 1024},
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "HTTP-Referer": "https://alexpavsky.com",
-                },
-                timeout=45,
-            )
-            if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"].strip()
-            last_error = f"{name}/{model} HTTP {r.status_code}"
-            log.warning("%s, trying next provider", last_error)
-        except Exception as e:
-            last_error = f"{name}/{model} {type(e).__name__}"
-            log.warning("%s, trying next provider", last_error)
+        for name, key_env, base_url, model, tier in providers:
+            tier_n = _normalize_tier(tier)
+            if not _is_allowed(model, tier_n):
+                continue
+            bid = _bucket_id(key_env, tier_n)
+            # One attempt per rate-limit bucket per request.
+            if bid in seen_buckets:
+                continue
+            if not force_all and _PROVIDER_COOLDOWN.get(bid, 0.0) > time.time():
+                continue
+            key = os.environ.get(key_env, "").strip()
+            if not key:
+                continue
+            seen_buckets.add(bid)
+            try:
+                r = httpx.post(
+                    f"{base_url}/chat/completions",
+                    json={"model": model, "messages": messages, "max_tokens": int(max_tokens)},
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "HTTP-Referer": "https://alexpavsky.com",
+                        "X-Title": "AlexPavsky Voice/RAG",
+                    },
+                    timeout=timeout,
+                )
+                if r.status_code == 200:
+                    content = r.json()["choices"][0]["message"]["content"]
+                    log.info(
+                        "llm_ok provider=%s model=%s tier=%s force_all=%s",
+                        name, model, tier_n, force_all,
+                    )
+                    return (content or "").strip()
+                if r.status_code in (429, 402, 403, 410, 503):
+                    _cool_bucket(bid)
+                last_error = f"{name}/{model} HTTP {r.status_code}"
+                log.warning("%s, trying next provider", last_error)
+            except Exception as e:
+                _cool_bucket(bid, min(_COOLDOWN_SECONDS, 30.0))
+                last_error = f"{name}/{model} {type(e).__name__}"
+                log.warning("%s, trying next provider", last_error)
 
     return f"LLM unavailable — all providers failed. Last error: {last_error or 'no keys set'}"
 
@@ -396,6 +503,17 @@ class QueryRequest(BaseModel):
     document_id: Optional[str] = None
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Opt-in tuning for low-latency callers (e.g. the voice agent). Both default
+    # to the historic behavior, so the website chat is unaffected.
+    #   skip_metrics: don't run the two extra Ragas LLM calls (faithfulness +
+    #     answer_relevancy) — removes ~2/3 of the per-query LLM latency.
+    #   system: override the answer system prompt (e.g. a brief spoken-voice persona).
+    skip_metrics: bool = False
+    system: Optional[str] = None
+    # Low-latency callers (voice) may cap how many context chunks reach the LLM.
+    max_context_chunks: Optional[int] = None
+    # Cap generation length (voice wants short spoken answers).
+    max_tokens: Optional[int] = None
 
 
 @app.post("/api/rag/query")
@@ -461,19 +579,40 @@ async def rag_query(req: QueryRequest):
     if not context_chunks:
         raise HTTPException(404, "No relevant documents found. Upload documents first.")
 
+    # Low-latency callers (voice) can cap the context chunks fed to the LLM:
+    # fewer chunks keep the prompt under the fast 8B model's payload limit
+    # (avoids its 413 fallthrough) and speed generation. Default keeps all.
+    if req.max_context_chunks and req.max_context_chunks > 0:
+        context_chunks = context_chunks[: req.max_context_chunks]
     context_text = "\n\n---\n\n".join(context_chunks)
 
     # --- LLM answer ---
-    system_prompt = (
+    system_prompt = (req.system or "").strip() or (
         "You are a helpful assistant. Answer the user's question using ONLY the provided context. "
         "If the context does not contain enough information, say so clearly."
     )
     user_prompt = f"Context:\n{context_text}\n\nQuestion: {req.query}"
-    answer = call_llm(user_prompt, system=system_prompt)
+    # Voice / low-latency: short answers + tighter provider timeout.
+    gen_max_tokens = int(req.max_tokens) if req.max_tokens and req.max_tokens > 0 else 1024
+    gen_timeout = 12.0 if req.skip_metrics else 20.0
+    if req.skip_metrics and not req.max_tokens:
+        gen_max_tokens = 180  # ~2 short spoken sentences
+    answer = call_llm(
+        user_prompt,
+        system=system_prompt,
+        max_tokens=gen_max_tokens,
+        timeout=gen_timeout,
+    )
 
     # --- Metrics ---
-    faithfulness = compute_faithfulness(answer, context_chunks)
-    answer_relevancy = compute_answer_relevancy(req.query, answer)
+    # Low-latency callers (voice) skip the two extra Ragas LLM calls; the columns
+    # are nullable, so we simply persist NULL and return null metrics.
+    if req.skip_metrics:
+        faithfulness = None
+        answer_relevancy = None
+    else:
+        faithfulness = compute_faithfulness(answer, context_chunks)
+        answer_relevancy = compute_answer_relevancy(req.query, answer)
 
     # --- Persist to DB ---
     conn = get_pg()
@@ -511,8 +650,8 @@ async def rag_query(req: QueryRequest):
         # read this instead of `sources[].content`, which is a 300-char preview.
         "contexts": context_chunks,
         "metrics": {
-            "faithfulness": round(faithfulness, 4),
-            "answer_relevancy": round(answer_relevancy, 4),
+            "faithfulness": round(faithfulness, 4) if faithfulness is not None else None,
+            "answer_relevancy": round(answer_relevancy, 4) if answer_relevancy is not None else None,
         },
         "pgvector_results": [{"content": r["content"][:200], "score": float(r["score"])} for r in pg_results],
         "qdrant_results": [{"content": r["content"][:200], "score": round(r["score"], 4)} for r in qdrant_results],

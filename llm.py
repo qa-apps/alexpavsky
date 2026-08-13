@@ -45,6 +45,16 @@ PROVIDER_API_URL = {
     "mistral": "https://api.mistral.ai/v1/chat/completions",
 }
 
+CHAT_FREE_MODELS_ONLY = os.environ.get("CHAT_FREE_MODELS_ONLY", "1").strip().lower() not in ("0", "false", "no")
+FREE_VISION_MODEL_PREFERENCE = tuple(
+    item.strip()
+    for item in os.environ.get(
+        "CHAT_FREE_VISION_MODEL_IDS",
+        "gemini-2.5-flash,gemini-2.0-flash",
+    ).split(",")
+    if item.strip()
+)
+
 PROVIDER_KEY_ENV = {
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
@@ -75,6 +85,27 @@ def _provider_api_key(provider):
     return ""
 
 
+def _is_free_model(model):
+    if not CHAT_FREE_MODELS_ONLY:
+        return True
+    if not isinstance(model, dict):
+        return False
+    return bool(model.get("free")) or str(model.get("id", "")).endswith(":free")
+
+
+def _free_vision_models():
+    preferred = [MODEL_BY_ID[m_id] for m_id in FREE_VISION_MODEL_PREFERENCE if m_id in MODEL_BY_ID]
+    preferred_ids = {m["id"] for m in preferred}
+    dynamic = [
+        m for m in CHAT_MODELS
+        if m.get("id") not in preferred_ids
+        and str(m.get("id", "")).endswith(":free")
+        and m.get("vision")
+        and _is_free_model(m)
+    ]
+    return [m for m in preferred + dynamic if m.get("vision") and _is_free_model(m)]
+
+
 def _provider_available(provider):
     return bool(_provider_api_key(provider))
 
@@ -84,10 +115,14 @@ def _provider_available(provider):
 
 _STATIC_MODELS = [
     # Gemini
-    {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "provider": "gemini", "vision": True, "tier": "S"},
-    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "provider": "gemini", "vision": True, "tier": "M"},
+    {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "S"},
+    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
     {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "provider": "gemini", "vision": True, "tier": "H"},
     # OpenRouter free tier
+    {"id": "google/gemma-4-31b-it:free", "label": "Gemma 4 31B", "provider": "openrouter", "free": True, "vision": True, "tier": "M"},
+    {"id": "google/gemma-4-26b-a4b-it:free", "label": "Gemma 4 26B", "provider": "openrouter", "free": True, "vision": True, "tier": "M"},
+    {"id": "nvidia/nemotron-nano-12b-v2-vl:free", "label": "Nemotron Nano 12B VL", "provider": "openrouter", "free": True, "vision": True, "tier": "M"},
+    {"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "label": "Nemotron 3 Nano Omni", "provider": "openrouter", "free": True, "vision": True, "tier": "M", "reasoning": True},
     {"id": "google/gemma-3-27b-it:free", "label": "Gemma 3 27B", "provider": "openrouter", "tier": "S"},
     {"id": "meta-llama/llama-3.3-70b-instruct:free", "label": "Llama 3.3 70B", "provider": "openrouter", "tier": "M"},
     {"id": "deepseek/deepseek-r1-0528:free", "label": "DeepSeek R1", "provider": "openrouter", "tier": "H", "reasoning": True},
@@ -295,7 +330,7 @@ def _record_model_failure(model, err):
 
 def _pick(candidates):
     """Weighted random choice among available candidates (newest-first bias)."""
-    available = [m for m in candidates if _model_available(m)]
+    available = [m for m in candidates if _is_free_model(m) and _model_available(m)]
     if not available:
         return None
     n = len(available)
@@ -310,8 +345,7 @@ def _route(message, attachments):
     msg_len = len(message)
 
     if has_images:
-        vision_pool = [MODEL_BY_ID.get(i) for i in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash") if MODEL_BY_ID.get(i)]
-        best = _pick(vision_pool)
+        best = _pick(_free_vision_models())
         if best:
             return best, "H", "vision"
 
@@ -568,7 +602,7 @@ def generate(message, attachments=None, history=None, system_prompt=DEFAULT_SYST
 
         chain = _get_fallback_chain(model, tier)
         if reason == "vision":
-            chain = [m for m in chain if m.get("id") in VISION_MODEL_IDS]
+            chain = [m for m in chain if m.get("id") in VISION_MODEL_IDS and _is_free_model(m)]
         for fallback in chain:
             if not _model_available(fallback):
                 continue

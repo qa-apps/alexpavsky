@@ -206,7 +206,8 @@
 
     function apiUrl(path) {
         var localHosts = { localhost: true, '127.0.0.1': true, '0.0.0.0': true };
-        var isLocalPreview = localHosts[window.location.hostname] && window.location.port && window.location.port !== '8000';
+        var isFilePreview = window.location.protocol === 'file:';
+        var isLocalPreview = isFilePreview || (localHosts[window.location.hostname] && window.location.port && window.location.port !== '8000');
         var base = isLocalPreview ? 'http://127.0.0.1:8000' : '';
         return path.indexOf('/api/') === 0 ? base + path : path;
     }
@@ -795,9 +796,20 @@
         return false;
     }
 
+    function isMeaningfulHeadlineArticle(article) {
+        var title = ((article && article.title) || '').trim();
+        if (!title) return false;
+        // Keep known vague, diary-style one-liners out of public feed surfaces.
+        if (/^we got used to it before we understood it[.!?]*$/i.test(title)) return false;
+        return true;
+    }
+
     function filterPreviewableFeedArticles(articles) {
         return (articles || []).filter(function (article) {
-            return article && isLikelyEnglishFeedArticle(article) && !isBlockedPreviewArticle(article);
+            return article &&
+                isLikelyEnglishFeedArticle(article) &&
+                !isBlockedPreviewArticle(article) &&
+                isMeaningfulHeadlineArticle(article);
         });
     }
 
@@ -1736,8 +1748,45 @@
 
 
     // ─── RAG Hallucination Tester ───
-    function openModal(modal) { if (modal) modal.classList.add('active'); }
+    function openModal(modal) {
+        if (!modal) return;
+        document.querySelectorAll('.json-modal.active, .diff-modal.active').forEach(function (activeModal) {
+            if (activeModal !== modal) activeModal.classList.remove('active');
+        });
+        modal.classList.add('active');
+    }
     function closeModal(modal) { if (modal) modal.classList.remove('active'); }
+    function getUnderlyingModalTrigger(clientX, clientY) {
+        var activeLayers = Array.from(document.querySelectorAll('.json-modal.active, .diff-modal.active'));
+        activeLayers.forEach(function (layer) { layer.style.pointerEvents = 'none'; });
+        var target = document.elementFromPoint(clientX, clientY);
+        activeLayers.forEach(function (layer) { layer.style.pointerEvents = ''; });
+        if (target && target.closest) {
+            var direct = target.closest('#open-hallucination-btn, #open-pitest-btn, .tool-strip-card');
+            if (direct) return direct;
+        }
+        var triggers = Array.from(document.querySelectorAll('#open-hallucination-btn, #open-pitest-btn, .tool-strip-card'));
+        for (var i = 0; i < triggers.length; i++) {
+            var rect = triggers[i].getBoundingClientRect();
+            if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+                return triggers[i];
+            }
+        }
+        return null;
+    }
+    function closeModalFromCoveredTrigger(modal, event, onAfterClose) {
+        var reopenTarget = null;
+        if (event && typeof event.clientX === 'number' && typeof event.clientY === 'number') {
+            reopenTarget = getUnderlyingModalTrigger(event.clientX, event.clientY);
+        }
+        if (!reopenTarget) return false;
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        closeModal(modal);
+        if (typeof onAfterClose === 'function') onAfterClose();
+        if (reopenTarget && typeof reopenTarget.click === 'function') reopenTarget.click();
+        return true;
+    }
 
     var HALLUCINATION_MAX_CHARS = 80000;
     var HALLUCINATION_MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -1771,7 +1820,15 @@
 
         if (openBtn) openBtn.addEventListener('click', function () { openModal(modal); });
         if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); });
-        if (modal) modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); });
+        if (modal) {
+            modal.addEventListener('click', function (event) {
+                if (event.target && event.target.closest && event.target.closest('.modal-close')) return;
+                closeModalFromCoveredTrigger(modal, event);
+            }, true);
+            modal.querySelector('.modal-overlay').addEventListener('click', function (event) {
+                closeModalFromCoveredTrigger(modal, event);
+            });
+        }
 
         if (uploadBtn && fileInput) {
             uploadBtn.addEventListener('click', function () { fileInput.click(); });
@@ -2217,17 +2274,23 @@
     var loginError = document.getElementById('login-error');
     var registerError = document.getElementById('register-error');
 
-    var authToken = localStorage.getItem('auth_token') || '';
+    // Auth session is HttpOnly cookie (ap_auth). Do not store tokens in localStorage.
+    try { localStorage.removeItem('auth_token'); } catch (e) {}
     var currentUser = null;
 
     function authHeaders() {
-        return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken };
+        return { 'Content-Type': 'application/json' };
     }
 
-    function setLoggedIn(user, token) {
-        authToken = token;
+    function authFetch(url, options) {
+        options = options || {};
+        options.credentials = 'include';
+        options.headers = Object.assign(authHeaders(), options.headers || {});
+        return fetch(url, options);
+    }
+
+    function setLoggedIn(user) {
         currentUser = user;
-        localStorage.setItem('auth_token', token);
         if (authBtn) authBtn.style.display = 'none';
         if (userMenu) userMenu.style.display = '';
         if (userDisplayName) userDisplayName.textContent = user.name.split(' ')[0];
@@ -2236,9 +2299,8 @@
     }
 
     function setLoggedOut() {
-        authToken = '';
         currentUser = null;
-        localStorage.removeItem('auth_token');
+        try { localStorage.removeItem('auth_token'); } catch (e) {}
         if (authBtn) authBtn.style.display = '';
         if (userMenu) userMenu.style.display = 'none';
         if (dashboardLink) dashboardLink.style.display = '';
@@ -2266,15 +2328,14 @@
 
     function closeAuthModal() { if (authOverlay) authOverlay.classList.remove('open'); }
 
-    if (authToken) {
-        fetch(apiUrl('/api/auth/me'), { headers: authHeaders() })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.id) setLoggedIn(data, authToken);
-                else setLoggedOut();
-            })
-            .catch(function() { setLoggedOut(); });
-    }
+    // Restore session from HttpOnly cookie (if present).
+    authFetch(apiUrl('/api/auth/me'))
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+            if (res.ok && res.data && res.data.id) setLoggedIn(res.data);
+            else setLoggedOut();
+        })
+        .catch(function() { setLoggedOut(); });
 
     if (authBtn) authBtn.addEventListener('click', function() { openAuthModal('login'); });
     if (authModalClose) authModalClose.addEventListener('click', closeAuthModal);
@@ -2292,16 +2353,15 @@
             var password = document.getElementById('login-password').value;
             var btn = loginForm.querySelector('.auth-submit');
             btn.disabled = true;
-            fetch(apiUrl('/api/auth/login'), {
+            authFetch(apiUrl('/api/auth/login'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: email, password: password })
             })
             .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
             .then(function(res) {
                 btn.disabled = false;
                 if (!res.ok) { loginError.textContent = res.data.error || 'Login failed.'; return; }
-                setLoggedIn(res.data.user, res.data.token);
+                setLoggedIn(res.data.user);
                 closeAuthModal();
                 loginForm.reset();
             })
@@ -2320,16 +2380,20 @@
             if (pw !== pw2) { registerError.textContent = 'Passwords do not match.'; return; }
             var btn = registerForm.querySelector('.auth-submit');
             btn.disabled = true;
-            fetch(apiUrl('/api/auth/register'), {
+            authFetch(apiUrl('/api/auth/register'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: name, email: email, password: pw })
             })
             .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
             .then(function(res) {
                 btn.disabled = false;
-                if (!res.ok) { registerError.textContent = res.data.error || 'Registration failed.'; return; }
-                setLoggedIn(res.data.user, res.data.token);
+                if (!res.ok) {
+                    var err = res.data.error || 'Registration failed.';
+                    if (err === 'password_too_short') err = 'Password must be at least 10 characters.';
+                    registerError.textContent = err;
+                    return;
+                }
+                setLoggedIn(res.data.user);
                 closeAuthModal();
                 registerForm.reset();
             })
@@ -2354,8 +2418,8 @@
             var email = document.getElementById('forgot-email').value.trim();
             btn.disabled = true;
             try {
-                var res = await fetch(apiUrl('/api/auth/forgot'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                var res = await authFetch(apiUrl('/api/auth/forgot'), {
+                    method: 'POST',
                     body: JSON.stringify({ email: email })
                 });
                 var data = await res.json();
@@ -2385,8 +2449,8 @@
             var password = document.getElementById('reset-password').value;
             btn.disabled = true;
             try {
-                var res = await fetch(apiUrl('/api/auth/reset'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                var res = await authFetch(apiUrl('/api/auth/reset'), {
+                    method: 'POST',
                     body: JSON.stringify({ token: token, password: password })
                 });
                 var data = await res.json();
@@ -2462,9 +2526,9 @@
     }
 
     function loadDashboardMessages() {
-        if (!authToken) return Promise.resolve();
+        if (!currentUser) return Promise.resolve();
         setDashboardStatus('Loading...', '');
-        return fetch(apiUrl('/api/user/messages'), { headers: authHeaders() })
+        return authFetch(apiUrl('/api/user/messages'))
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
             .then(function (res) {
                 if (!res.ok) throw new Error(res.data.error || 'Failed to load dashboard.');
@@ -2515,9 +2579,8 @@
             var btn = dashboardForm.querySelector('.dashboard-send-btn');
             if (btn) btn.disabled = true;
             setDashboardStatus('Sending...', '');
-            fetch(apiUrl('/api/user/messages'), {
+            authFetch(apiUrl('/api/user/messages'), {
                 method: 'POST',
-                headers: authHeaders(),
                 body: JSON.stringify({ text: text })
             })
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -2608,7 +2671,7 @@
     function loadAdminEmailStatus() {
         if (!adminEmailStatus) return Promise.resolve();
         adminEmailStatus.textContent = 'Checking email setup...';
-        return fetch(apiUrl('/api/admin/email-status'), { headers: authHeaders() })
+        return authFetch(apiUrl('/api/admin/email-status'))
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
             .then(function (res) {
                 if (!res.ok) throw new Error(res.data.error || 'email_status_failed');
@@ -2624,7 +2687,7 @@
     function loadAdminConversations(preferredUserId) {
         if (!adminConversationList) return Promise.resolve();
         adminConversationList.innerHTML = '<div class="dashboard-empty">Loading conversations...</div>';
-        return fetch(apiUrl('/api/admin/conversations'), { headers: authHeaders() })
+        return authFetch(apiUrl('/api/admin/conversations'))
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
             .then(function (res) {
                 if (!res.ok) throw new Error(res.data.error || 'Failed to load conversations.');
@@ -2647,7 +2710,7 @@
             return Promise.resolve();
         }
         if (adminThreadMessages) adminThreadMessages.innerHTML = '<div class="dashboard-empty">Loading thread...</div>';
-        return fetch(apiUrl('/api/admin/messages?user_id=' + encodeURIComponent(userId)), { headers: authHeaders() })
+        return authFetch(apiUrl('/api/admin/messages?user_id=' + encodeURIComponent(userId)))
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
             .then(function (res) {
                 if (!res.ok) throw new Error(res.data.error || 'Failed to load thread.');
@@ -2698,9 +2761,8 @@
             var btn = adminReplyForm.querySelector('.dashboard-send-btn');
             if (btn) btn.disabled = true;
             setAdminReplyStatus('Sending...', '');
-            fetch(apiUrl('/api/admin/reply'), {
+            authFetch(apiUrl('/api/admin/reply'), {
                 method: 'POST',
-                headers: authHeaders(),
                 body: JSON.stringify({ user_id: adminSelectedUserId, text: text })
             })
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -2723,7 +2785,7 @@
     if (logoutLink) {
         logoutLink.addEventListener('click', function(e) {
             e.preventDefault();
-            fetch(apiUrl('/api/auth/logout'), { method: 'POST', headers: authHeaders() }).catch(function() {});
+            authFetch(apiUrl('/api/auth/logout'), { method: 'POST' }).catch(function() {});
             setLoggedOut();
             closeDashboard();
             closeAdminDashboard();
@@ -2745,7 +2807,13 @@
 
         if (openBtn)  openBtn.addEventListener('click', function () { openModal(modal); });
         if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(modal); resetPitest(); });
-        modal.querySelector('.modal-overlay').addEventListener('click', function () { closeModal(modal); resetPitest(); });
+        modal.addEventListener('click', function (event) {
+            if (event.target && event.target.closest && event.target.closest('.modal-close')) return;
+            closeModalFromCoveredTrigger(modal, event, resetPitest);
+        }, true);
+        modal.querySelector('.modal-overlay').addEventListener('click', function (event) {
+            closeModalFromCoveredTrigger(modal, event, resetPitest);
+        });
 
         // ── Detection patterns ──────────────────────────────────────────────
 
@@ -3090,6 +3158,9 @@
         var chatMaximize = document.getElementById('chat-maximize');
         var chatStop = document.getElementById('chat-stop');
         var chatClearInput = document.getElementById('chat-clear-input');
+        var chatStatus = document.getElementById('chat-status');
+        var chatStatusText = document.getElementById('chat-status-text');
+        var chatStatusDot = document.getElementById('chat-status-dot');
         var attachBtn = document.getElementById('chat-attach-btn');
         var inlineAttachBtn = document.getElementById('chat-inline-attach');
         var micBtn = document.getElementById('chat-mic-btn');
@@ -3128,6 +3199,24 @@
         try { hasConsent = localStorage.getItem(CONSENT_KEY) === 'yes'; } catch (e) {}
 
         if (hasConsent && chatConsent) chatConsent.classList.add('hidden');
+
+        function setChatBackendStatus(isOnline) {
+            if (chatStatusText) chatStatusText.textContent = isOnline ? 'Online' : 'Backend offline';
+            if (chatStatus) chatStatus.classList.toggle('offline', !isOnline);
+            if (chatStatusDot) chatStatusDot.classList.toggle('offline', !isOnline);
+        }
+
+        async function refreshChatBackendStatus() {
+            try {
+                var response = await fetch(apiUrl('/api/health'), { cache: 'no-store', credentials: 'same-origin' });
+                setChatBackendStatus(!!response && response.ok);
+            } catch (_) {
+                setChatBackendStatus(false);
+            }
+        }
+
+        refreshChatBackendStatus();
+        setInterval(refreshChatBackendStatus, 30000);
 
         var chatTermsLink = document.getElementById('chat-terms-link');
         var chatTermsPanel = document.getElementById('chat-terms-panel');
@@ -3728,8 +3817,7 @@
             if (!activeContextAttachments.length) return false;
             var text = (message || '').trim();
             if (!text) return true;
-            if (text.length <= 140) return true;
-            return /(image|photo|picture|screenshot|file|document|attachment|resume|cv|pdf|doc|docx|txt|картин|файл|документ|вложен|резюм|скрин|изображен)/i.test(text);
+            return /\b(?:it|this|that|these|those|them|attachment|attached|file|document|image|photo|picture|screenshot|resume|cv|pdf|doc|docx|txt)\b|(?:картин|файл|документ|вложен|резюм|скрин|изображен|это|этот|эта|эти|него|нему|ней|них)/i.test(text);
         }
 
         function resolveEffectiveAttachments(message, attachments) {
@@ -3921,6 +4009,7 @@
                     try { errData = await response.json(); } catch (_) {}
                     var errReply = errData && typeof errData.reply === 'string' ? errData.reply.trim() : '';
                     if (errReply) {
+                        if (attachments && attachments.length) activeContextAttachments = [];
                         hideTypingIndicator();
                         conversationHistory.push({ role: 'assistant', content: errReply });
                         addBotMessage(errReply);
@@ -3944,7 +4033,13 @@
                 if (error && error.name === 'AbortError') {
                     addBotMessage('Response stopped.');
                 } else if (attachments && attachments.length) {
-                    addBotMessage('I received the attachment, but the analysis service is temporarily unavailable right now. Please try again in a moment.');
+                    activeContextAttachments = [];
+                    if (error instanceof TypeError) {
+                        setChatBackendStatus(false);
+                        addBotMessage('The chat backend is unreachable, so I cannot analyze the attachment right now. Start the local chat server on port 8000 or try again when the site backend is online.');
+                    } else {
+                        addBotMessage('I received the attachment, but the free image-analysis model is temporarily unavailable right now. Please try again in a moment.');
+                    }
                 } else {
                     addBotMessage(getFallbackReply(userMessage));
                 }

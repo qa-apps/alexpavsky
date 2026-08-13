@@ -6,7 +6,6 @@
 -- ============================================================
 
 -- Extensions ---------------------------------------------------
-CREATE EXTENSION IF NOT EXISTS vector;      -- pgvector for embeddings
 CREATE EXTENSION IF NOT EXISTS pg_trgm;     -- trigram search for full-text
 CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid()
 
@@ -103,17 +102,11 @@ CREATE TABLE IF NOT EXISTS documents (
     filename    TEXT        NOT NULL,
     content     TEXT,                       -- full raw text (optional cache)
     chunk_count INT         NOT NULL DEFAULT 0,
+    index_status TEXT       NOT NULL DEFAULT 'pending',
+    indexed_at  TIMESTAMPTZ,
+    index_error TEXT,
+    qdrant_collection TEXT  NOT NULL DEFAULT 'documents',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS document_chunks (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id     UUID        NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    chunk_index     INT         NOT NULL,
-    content         TEXT        NOT NULL,
-    embedding       vector(1536),           -- text-embedding-3-small output dim
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (document_id, chunk_index)
 );
 
 CREATE TABLE IF NOT EXISTS rag_queries (
@@ -147,15 +140,6 @@ CREATE TABLE IF NOT EXISTS eval_runs (
 -- INDEXES
 -- ============================================================
 
--- pgvector ANN index (IVFFlat, cosine distance)
--- NOTE: IVFFlat requires data to exist before CREATE INDEX.
---       On an empty table this still succeeds; rebuild after bulk load:
---         REINDEX INDEX idx_chunks_embedding;
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding
-    ON document_chunks
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
-
 -- General indexes
 CREATE INDEX IF NOT EXISTS idx_chat_logs_created_at  ON chat_logs (created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_session     ON chat_logs (session_id);
@@ -166,6 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_newsletter_runs_week  ON newsletter_runs (week_ke
 CREATE INDEX IF NOT EXISTS idx_rag_queries_session   ON rag_queries (session_id);
 CREATE INDEX IF NOT EXISTS idx_rag_queries_created   ON rag_queries (created_at);
 CREATE INDEX IF NOT EXISTS idx_eval_runs_created     ON eval_runs (created_at);
+CREATE INDEX IF NOT EXISTS idx_documents_index_status ON documents (index_status);
 CREATE INDEX IF NOT EXISTS idx_nl_deliveries_run     ON newsletter_deliveries (run_id);
 
 -- Trigram index for full-text search on chat messages

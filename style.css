@@ -222,6 +222,7 @@ img { max-width: 100%; display: block; }
     font-weight: 500;
     color: var(--text-secondary);
     transition: var(--transition);
+    white-space: nowrap;
 }
 
 .nav-link:hover { color: var(--text-primary); background: var(--glass); }
@@ -3671,6 +3672,10 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 /* ─── Chat Widget ─── */
 .chat-widget { position: fixed; bottom: 56px; right: 20px; z-index: 9999; }
 
+/* ElevenLabs voice agent self-positions bottom-left via its `placement`
+   attribute (see index.html); no host override — a fixed host box clips the
+   widget's internal overlay off-screen. */
+
 .chat-toggle {
     width: 64px; height: 64px; border-radius: 50%; background: var(--gradient);
     border: none; color: #fff; font-size: 1.6rem; cursor: pointer;
@@ -3804,6 +3809,8 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-header h4 { font-size: 0.9rem; font-weight: 600; margin: 0; }
 .chat-status { font-size: 0.7rem; opacity: 0.9; display: flex; align-items: center; gap: 0.3rem; }
 .status-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; animation: pulse 2s ease-in-out infinite; }
+.chat-status.offline { opacity: 0.75; }
+.status-dot.offline { background: var(--danger); animation: none; }
 .chat-header-actions { display: flex; gap: 0.25rem; }
 .chat-header-btn, .chat-close-btn {
     background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer;
@@ -4219,6 +4226,14 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ─── Responsive ─── */
 @media (max-width: 900px) {
+    /* Keep the full tablet nav on one line. Below 769px the mobile menu takes
+       over, so this range can safely trade some horizontal padding for a
+       stable, normal-height header without shrinking or wrapping the CTA. */
+    .nav-inner { padding-inline: 1rem; }
+    .nav-links { gap: 0.125rem; }
+    .nav-link { padding-inline: 0.5rem; }
+    .nav-actions { gap: 0.35rem; }
+
     .hero {
         flex-direction: column;
         text-align: center;
@@ -4243,6 +4258,11 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
     .explore-grid { grid-template-columns: repeat(3, 1fr); }
     .tools-grid { grid-template-columns: repeat(4, 1fr); }
     .lab-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 768px) {
+    .nav-links { display: none; }
+    .nav-menu-btn { display: flex; align-items: center; justify-content: center; }
 }
 
 @media (max-width: 640px) {

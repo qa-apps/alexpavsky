@@ -149,7 +149,7 @@ stack = [
     ("LLM Evaluation", "Promptfoo 0.85, DeepEval 1.4, Ragas 0.2.1"),
     ("Observability", "Langfuse 2.50 (self-hosted), Arize Phoenix 4.21"),
     ("Performance", "k6 0.52, Grafana 11.2, Prometheus 2.54"),
-    ("Vector Database", "pgvector 0.7 on PostgreSQL 16, Qdrant 1.11 as comparison"),
+    ("Vector Database", "Qdrant 1.11 for vector retrieval; PostgreSQL 16 for metadata"),
     ("Agent Framework", "LangGraph 0.2, Model Context Protocol (MCP) 0.4"),
     ("CI/CD", "GitHub Actions, ArgoCD 2.12, Docker 26, Kubernetes 1.30"),
 ]

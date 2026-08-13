@@ -21,3 +21,12 @@ python3 chat_server.py
 ```
 
 Open `index.html` or serve the directory with your preferred local static server.
+
+## RAG Storage
+
+- Qdrant is the only vector and chunk retrieval store.
+- PostgreSQL stores document metadata, indexing status, queries, and eval runs.
+- Uploads use stable Qdrant point IDs and retry failed upserts three times.
+- Create a collection snapshot with `ops/backup_qdrant.sh` before migrations or bulk ingestion.
+- Backfill PostgreSQL metadata from an existing Qdrant collection with
+  `docker compose exec -T rag-api python /app/backfill_qdrant_metadata.py`.

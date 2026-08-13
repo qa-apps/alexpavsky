@@ -11,6 +11,7 @@ import socket
 import sqlite3
 import smtplib
 import ssl
+import sys
 import threading
 import time
 import unicodedata
@@ -43,7 +44,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("chat")
 
 # Store DB outside web root for security
-os.chdir(Path(__file__).resolve().parent)
+_PROJECT_ROOT = Path(__file__).resolve().parent
+os.chdir(_PROJECT_ROOT)
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Shared multi-agent runtime (Safety → Supervisor → RAG/General → Adapter).
+# Observability: Langfuse for chat when LANGFUSE_* keys are set.
+try:
+    from agents import AgentDeps, TurnRequest, run_turn
+    from agents.runtime import RUNTIME_VERSION as AGENT_RUNTIME_VERSION
+    _AGENT_RUNTIME_AVAILABLE = True
+except Exception as _agent_import_err:  # pragma: no cover
+    _AGENT_RUNTIME_AVAILABLE = False
+    AGENT_RUNTIME_VERSION = "unavailable"
+    log.warning("agent_runtime_import_failed: %s", _agent_import_err)
 _data_dir = Path(os.environ.get("DATA_DIR", str(Path.home() / "alexpavsky-data")))
 _data_dir.mkdir(parents=True, exist_ok=True)
 DB_PATH = _data_dir / "chat.db"
@@ -452,11 +467,23 @@ def _get_user_by_token(token):
 
 
 def _check_auth_rate(ip_hash, action):
+    """Sliding-window rate limits per IP hash.
+
+    Windows are (seconds, max_requests). Defaults are intentionally strict for
+    auth and spend-sensitive endpoints (chat burns provider API quota).
+    """
     now = time.time()
     windows = {
-        "register": (3600, 100),
+        "register": (3600, 10),   # 10 registrations / hour
+        "login": (900, 10),       # 10 logins / 15 min
+        "forgot": (3600, 5),      # 5 password-reset requests / hour
+        "forum": (3600, 30),
+        "subscribe": (3600, 20),
+        "chat": (3600, 60),       # 60 chat messages / hour
+        "challenge": (3600, 30),
+        "attack": (3600, 20),
     }
-    window, limit = windows.get(action, (3600, 100))
+    window, limit = windows.get(action, (3600, 60))
     key = (action, ip_hash)
     with _auth_rate_lock:
         bucket = _auth_rate_buckets.setdefault(key, [])
@@ -468,11 +495,12 @@ def _check_auth_rate(ip_hash, action):
 
 
 def _admin_login_emails():
+    # No hardcoded personal emails — set ADMIN_LOGIN_EMAILS / ADMIN_EMAIL in env.
     raw = (
         os.environ.get("ADMIN_LOGIN_EMAILS")
         or os.environ.get("ADMIN_LOGIN_EMAIL")
         or os.environ.get("ADMIN_EMAIL")
-        or "alex@alexpavsky.com,alex.pavsky@gmail.com"
+        or ""
     )
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
@@ -620,6 +648,21 @@ PROVIDER_API_URL = {
     "mistral": MISTRAL_API_URL,
 }
 
+CHAT_FREE_MODELS_ONLY = os.environ.get("CHAT_FREE_MODELS_ONLY", "1").strip().lower() not in ("0", "false", "no")
+FREE_VISION_MODEL_PREFERENCE = tuple(
+    item.strip()
+    for item in os.environ.get(
+        "CHAT_FREE_VISION_MODEL_IDS",
+        "google/gemma-4-31b-it:free,"
+        "google/gemma-4-26b-a4b-it:free,"
+        "nvidia/nemotron-nano-12b-v2-vl:free,"
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,"
+        "gemini-2.5-flash,"
+        "gemini-2.0-flash",
+    ).split(",")
+    if item.strip()
+)
+
 def _provider_env_names(provider):
     primary = PROVIDER_KEY_ENV.get(provider) or f"{str(provider).upper().replace('-', '_')}_API_KEY"
     extras = PROVIDER_KEY_ALIASES.get(provider, ())
@@ -632,6 +675,25 @@ def _provider_api_key(provider):
             return value
     return ""
 
+def _is_free_model(model):
+    if not CHAT_FREE_MODELS_ONLY:
+        return True
+    if not isinstance(model, dict):
+        return False
+    return bool(model.get("free")) or str(model.get("id", "")).endswith(":free")
+
+def _free_vision_models():
+    preferred = [MODEL_BY_ID[m_id] for m_id in FREE_VISION_MODEL_PREFERENCE if m_id in MODEL_BY_ID]
+    preferred_ids = {m["id"] for m in preferred}
+    dynamic = [
+        m for m in CHAT_MODELS
+        if m.get("id") not in preferred_ids
+        and str(m.get("id", "")).endswith(":free")
+        and m.get("vision")
+        and _is_free_model(m)
+    ]
+    return [m for m in preferred + dynamic if m.get("vision") and _is_free_model(m)]
+
 def _model_env(name, default):
     value = (os.environ.get(name) or "").strip()
     return value or default
@@ -640,8 +702,12 @@ _STATIC_MODELS = [
     {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "S"},
     {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
     {"id": "gemini-3.1-flash-lite", "label": "Gemini 3 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
-    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "provider": "gemini", "free": True, "vision": True, "tier": "H"},
-    {"id": "gemini-3-pro-preview", "label": "Gemini 3 Pro", "provider": "gemini", "free": True, "vision": True, "tier": "H"},
+    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "provider": "gemini", "vision": True, "tier": "H"},
+    {"id": "gemini-3-pro-preview", "label": "Gemini 3 Pro", "provider": "gemini", "vision": True, "tier": "H"},
+    {"id": "google/gemma-4-31b-it:free", "label": "Gemma 4 31B", "provider": "openrouter", "free": True, "vision": True, "tier": "M"},
+    {"id": "google/gemma-4-26b-a4b-it:free", "label": "Gemma 4 26B", "provider": "openrouter", "free": True, "vision": True, "tier": "M"},
+    {"id": "nvidia/nemotron-nano-12b-v2-vl:free", "label": "Nemotron Nano 12B VL", "provider": "openrouter", "free": True, "vision": True, "tier": "M"},
+    {"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "label": "Nemotron 3 Nano Omni", "provider": "openrouter", "free": True, "vision": True, "tier": "M", "reasoning": True},
     {"id": "google/gemma-3-27b-it:free", "label": "Gemma 3 27B", "provider": "openrouter", "free": True, "tier": "S"},
     {"id": "mistralai/mistral-small-3.1-24b-instruct:free", "label": "Mistral Small 24B", "provider": "openrouter", "free": True, "tier": "S"},
     {"id": "stepfun/step-3.5-flash:free", "label": "Step 3.5 Flash", "provider": "openrouter", "free": True, "tier": "S"},
@@ -730,7 +796,9 @@ def _sync_dynamic_models():
                 
                 if "test" in lower_id or "experimental" in lower_id:
                     continue
-                
+                if any(k in lower_id or k in lower_name for k in ("guard", "shield", "moderat", "safety")):
+                    continue
+
                 model_obj = {
                     "id": m_id,
                     "label": m_name,
@@ -739,7 +807,8 @@ def _sync_dynamic_models():
                     "created": created
                 }
                 
-                if "vision" in lower_id or "vision" in lower_name:
+                input_modalities = (m.get("architecture") or {}).get("input_modalities") or []
+                if "image" in input_modalities or "vision" in lower_id or "vision" in lower_name:
                     model_obj["vision"] = True
                 if "coder" in lower_id or "code" in lower_id or "coder" in lower_name:
                     model_obj["coding"] = True
@@ -780,7 +849,9 @@ def _sync_dynamic_models():
             
             if "test" in lower_id or "experimental" in lower_id or "gpt2" in lower_id or "opt" in lower_id:
                 continue
-                
+            if any(k in lower_id for k in ("guard", "shield", "moderat", "safety")):
+                continue
+
             model_obj = {
                 "id": m_id,
                 "label": f"HF {m_name}",
@@ -2275,7 +2346,7 @@ def _youtube_cached_videos() -> list:
     return videos
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_BASE = (
     "You are a helpful AI assistant on Alex Pavsky's personal tech hub. "
     "You can answer questions on any topic — QA, AI testing, coding, science, history, math, languages, or casual chat. "
     "Be concise, friendly, and accurate. Format code in fenced blocks with language tags. "
@@ -2295,6 +2366,11 @@ SYSTEM_PROMPT = (
     "If the user asks to generate an image, say that the site will use its image-generation endpoint or explain availability in plain text. "
     "Answer in the user's language when possible."
 )
+
+
+def _system_prompt():
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"Today's date is {today} (UTC). " + SYSTEM_PROMPT_BASE
 
 PROMPT_EXTRACTION_RE = re.compile(
     r"(?:system|developer|hidden|internal)\s+(?:prompt|instruction|message)|"
@@ -2577,7 +2653,7 @@ def _err_code(err):
 
 def _pick(candidates):
     import random
-    available = [m for m in candidates if _model_available(m)]
+    available = [m for m in candidates if _is_free_model(m) and _model_available(m)]
     if not available:
         return None
         
@@ -2594,8 +2670,7 @@ def _route(message, attachments):
     msg_len = len(message)
 
     if has_images:
-        vision_pool = [MODEL_BY_ID.get(i) for i in ("gemini-2.5-pro", "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash") if MODEL_BY_ID.get(i)]
-        best = _pick(vision_pool)
+        best = _pick(_free_vision_models())
         if best:
             return best, "H", "vision"
 
@@ -2807,12 +2882,30 @@ def _call_gemini(model_id, system_prompt, user_content, api_key, history=None):
     return "\n".join(p.get("text", "") for p in candidates[0].get("content", {}).get("parts", []) if p.get("text")).strip()
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+_THINK_UNCLOSED_RE = re.compile(r"<think>.*", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_reasoning(text):
+    # Reasoning models (DeepSeek R1, etc.) sometimes emit their chain-of-thought
+    # as literal <think>...</think> text inside message.content instead of a
+    # separate reasoning field. Never show that to the user. An unclosed tag
+    # (max_tokens cut the response off mid-thought) means everything after it
+    # is reasoning too, so drop the rest of the string in that case.
+    if not text:
+        return text
+    stripped = _THINK_BLOCK_RE.sub("", text)
+    stripped = _THINK_UNCLOSED_RE.sub("", stripped)
+    return stripped.strip()
+
+
 def _extract_reply(data):
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     if isinstance(content, str):
-        return content
+        return _strip_reasoning(content)
     if isinstance(content, list):
-        return "\n".join(i.get("text", "") for i in content if isinstance(i, dict) and i.get("text"))
+        joined = "\n".join(i.get("text", "") for i in content if isinstance(i, dict) and i.get("text"))
+        return _strip_reasoning(joined)
     return ""
 
 
@@ -2825,7 +2918,7 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
         return None, f"missing_{provider}_key"
     try:
         if provider == "gemini":
-            reply = _call_gemini(model["id"], system_prompt, user_content, api_key, history)
+            reply = _strip_reasoning(_call_gemini(model["id"], system_prompt, user_content, api_key, history))
             if not reply or not reply.strip():
                 return None, {"code": "empty_response", "provider": provider, "model": model.get("id")}
             return reply, None
@@ -2939,6 +3032,82 @@ def _looks_russian(text):
 
 def _is_image_generation_request(message):
     return bool(IMAGE_GENERATION_RE.search(message or ""))
+
+
+def _agent_runtime_enabled():
+    """Feature flag: AGENT_RUNTIME=0 disables the multi-agent path."""
+    if not _AGENT_RUNTIME_AVAILABLE:
+        return False
+    return os.environ.get("AGENT_RUNTIME", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _chat_general_generate(message, attachments, history):
+    """General specialist: existing multi-provider model orchestration + fallbacks."""
+    model, tier, reason = _route(message, attachments)
+    max_tok = _max_tokens(tier)
+    user_content, warning = _build_content(message, attachments, model["id"])
+    log.info("agent_general route: %s tier=%s reason=%s", model["label"], tier, reason)
+
+    reply, err = _call_model(model, _system_prompt(), user_content, max_tok, history)
+    if not reply or not reply.strip():
+        _record_model_failure(model, err)
+
+    if not reply or not reply.strip():
+        chain = _get_fallback_chain(model, tier)
+        if reason == "vision":
+            chain = [
+                fallback for fallback in chain
+                if fallback.get("id") in VISION_MODEL_IDS and _is_free_model(fallback)
+            ]
+        for fallback in chain:
+            if not _model_available(fallback):
+                continue
+            log.info("agent_general fallback: %s -> %s", model["label"], fallback["label"])
+            fallback_content, _ = _build_content(message, attachments, fallback["id"])
+            reply, err = _call_model(fallback, _system_prompt(), fallback_content, max_tok, history)
+            if reply and reply.strip():
+                model = fallback
+                break
+            _record_model_failure(fallback, err)
+            time.sleep(0.5)
+
+    if not reply or not reply.strip():
+        local_reply = _local_fallback_reply(message)
+        if local_reply:
+            return local_reply, None, "local_fallback", warning
+        return None, _err_code(err) or "no_response", model.get("label"), warning
+
+    reply = _sanitize_tool_call_reply(reply.strip(), message)
+    return reply, None, model.get("label"), warning
+
+
+def _chat_image_generate(message, attachments):
+    """Image tool specialist — Gemini image path used by the supervisor."""
+    image, image_err = _call_gemini_image(message, attachments)
+    if image:
+        reply = "Generated image:"
+        if _looks_russian(message):
+            reply = "Готово, сгенерировал картинку:"
+        return [image], None, reply
+    reply = _image_generation_unavailable_reply(message, image_err)
+    return None, _err_code(image_err), reply
+
+
+def _run_chat_agent_turn(message, attachments, history, session_id, user_id=None):
+    """Execute one chat turn through the shared agent runtime."""
+    deps = AgentDeps(
+        general_generate=_chat_general_generate,
+        image_generate=_chat_image_generate,
+    )
+    req = TurnRequest(
+        channel="chat",
+        message=message,
+        session_id=session_id or "",
+        history=history or [],
+        attachments=attachments or [],
+        user_id=user_id,
+    )
+    return run_turn(req, deps)
 
 
 def _image_generation_unavailable_reply(message, err):
@@ -3113,13 +3282,36 @@ class Handler(SimpleHTTPRequestHandler):
                 return part.split("=", 1)[1].strip()
         return None
 
-    def _json(self, status, payload, new_session=None):
+    def _cookie_flags(self, max_age):
+        """Shared cookie attributes: HttpOnly + SameSite + Secure on non-local."""
+        host = (self.headers.get("Host", "") or "").split(":", 1)[0].lower()
+        is_local = host in {"127.0.0.1", "localhost", "::1"}
+        parts = [f"Path=/", f"Max-Age={int(max_age)}", "SameSite=Lax", "HttpOnly"]
+        if not is_local:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def _chat_session_cookie(self, session_id, max_age=86400):
+        return f"ap_chat_sid={session_id}; {self._cookie_flags(max_age)}"
+
+    def _auth_session_cookie(self, token, max_age=604800):
+        # 7-day auth session, HttpOnly so XSS cannot steal the token via JS.
+        return f"ap_auth={token}; {self._cookie_flags(max_age)}"
+
+    def _clear_auth_cookie(self):
+        return f"ap_auth=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly; Secure"
+
+    def _json(self, status, payload, new_session=None, extra_cookies=None):
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self._cors()
         if new_session:
-            self.send_header("Set-Cookie", f"ap_chat_sid={new_session}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly")
+            self.send_header("Set-Cookie", self._chat_session_cookie(new_session))
+        if extra_cookies:
+            for cookie in extra_cookies:
+                if cookie:
+                    self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -3141,8 +3333,18 @@ class Handler(SimpleHTTPRequestHandler):
         return forwarded.split(",")[0].strip() if forwarded else self.client_address[0]
 
     def _get_token(self):
+        # Prefer Authorization for API clients; fall back to HttpOnly cookie.
         auth = self.headers.get("Authorization", "")
-        return auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
+        if auth.startswith("Bearer "):
+            token = auth[7:].strip()
+            if token:
+                return token
+        cookie_header = self.headers.get("Cookie", "")
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith("ap_auth="):
+                return part.split("=", 1)[1].strip()
+        return ""
 
     def _get_admin_user(self):
         user = _get_user_by_token(self._get_token())
@@ -3199,17 +3401,27 @@ class Handler(SimpleHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if path == "/api/health":
-            self._json(200, {
-                "status": "ok",
-                "service": "alexpavsky-chat-server",
-                "port": int(os.environ.get("CHAT_PORT", "8000")),
-                "database": "postgresql" if _pg_enabled() else "sqlite",
-                "sqlite_backup": bool(_pg_enabled()),
-                "providers": {
-                    p: bool(_provider_api_key(p))
-                    for p in ("groq", "openrouter", "gemini", "huggingface", "cerebras", "sambanova", "mistral")
-                },
-            })
+            # Public health is intentionally minimal (no provider/DB fingerprinting).
+            # Detailed status is available to authenticated admins only.
+            if self._get_admin_user():
+                self._json(200, {
+                    "status": "ok",
+                    "service": "alexpavsky-chat-server",
+                    "port": int(os.environ.get("CHAT_PORT", "8000")),
+                    "database": "postgresql" if _pg_enabled() else "sqlite",
+                    "sqlite_backup": bool(_pg_enabled()),
+                    "providers": {
+                        p: bool(_provider_api_key(p))
+                        for p in ("groq", "openrouter", "gemini", "huggingface", "cerebras", "sambanova", "mistral")
+                    },
+                    "agent_runtime": {
+                        "enabled": _agent_runtime_enabled(),
+                        "version": AGENT_RUNTIME_VERSION,
+                        "langfuse": bool(os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")),
+                    },
+                })
+            else:
+                self._json(200, {"status": "ok"})
             return
 
         if qs.get("access_key", [None])[0] == MAINTENANCE_KEY:
@@ -3537,7 +3749,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/auth/me":
             user = _get_user_by_token(self._get_token())
             if not user:
-                self._json(401, {"error": "not_authenticated"})
+                self._json(200, {"authenticated": False})
                 return
             self._json(200, _public_user_payload(user))
             return
@@ -3725,6 +3937,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/challenge": "_handle_challenge",
             "/api/attack-generator": "_handle_attack_generator",
             "/api/hallucination": "_handle_hallucination",
+            "/api/agent/turn": "_handle_agent_turn",
         }
         handler_name = POST_ROUTES.get(self.path)
         if handler_name is not None:
@@ -3765,6 +3978,9 @@ class Handler(SimpleHTTPRequestHandler):
             session_id = uuid.uuid4().hex
             new_session = session_id
         ip_hash = _hash_ip(self._client_ip())
+        if not _check_auth_rate(ip_hash, "chat"):
+            self._json(429, {"error": "rate_limit", "message": "Too many chat requests. Try again later."})
+            return
 
         message = _clean(body.get("message"), 12000)
         attachments = _sanitize_attachments(body.get("attachments", []))
@@ -3779,6 +3995,63 @@ class Handler(SimpleHTTPRequestHandler):
 
         _log_message(session_id, ip_hash, "user", message or "[attachment]")
 
+        # ── Multi-agent runtime (default on) ──────────────────────────────
+        if _agent_runtime_enabled():
+            try:
+                turn = _run_chat_agent_turn(message, attachments, history, session_id)
+            except Exception as exc:
+                log.exception("agent_turn_failed sid=%s: %s", session_id[:8], exc)
+                self._json(502, {
+                    "error": "agent_turn_failed",
+                    "reply": "Sorry, the assistant hit an internal error. Please try again.",
+                }, new_session)
+                return
+
+            log.info(
+                "agent_turn sid=%s intent=%s agents=%s model=%s trace=%s ms=%s",
+                session_id[:8],
+                turn.route_intent,
+                turn.agents_used,
+                turn.model,
+                (turn.trace_id or "")[:12],
+                turn.latency_ms,
+            )
+            model_label = turn.model or "agent"
+            _log_message(session_id, ip_hash, "assistant", turn.reply or "", model_label)
+
+            result = {
+                "reply": turn.reply,
+                "trace_id": turn.trace_id,
+                "agents_used": turn.agents_used,
+                "route_intent": turn.route_intent,
+                "route_reason": turn.route_reason,
+                "latency_ms": turn.latency_ms,
+            }
+            if turn.sources:
+                result["sources"] = turn.sources
+            if turn.safety:
+                result["safety"] = turn.safety
+            if turn.model:
+                result["model"] = turn.model
+            if turn.warning:
+                result["warning"] = turn.warning
+            if turn.degraded:
+                result["degraded"] = True
+            if turn.images:
+                result["images"] = turn.images
+            if turn.image_error:
+                result["image_error"] = turn.image_error
+            if turn.error and not turn.reply:
+                self._json(502, {
+                    "error": turn.error,
+                    "reply": turn.reply or "Sorry, all AI models are temporarily unavailable. Please try again in a moment.",
+                    "trace_id": turn.trace_id,
+                }, new_session)
+                return
+            self._json(200, result, new_session)
+            return
+
+        # ── Legacy single-path chat (AGENT_RUNTIME=0) ─────────────────────
         model, tier, reason = _route(message, attachments)
         max_tok = _max_tokens(tier)
         user_content, warning = _build_content(message, attachments, model["id"])
@@ -3813,20 +4086,20 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(200, {"reply": reply, "image_error": _err_code(image_err)}, new_session)
             return
 
-        reply, err = _call_model(model, SYSTEM_PROMPT, user_content, max_tok, history)
+        reply, err = _call_model(model, _system_prompt(), user_content, max_tok, history)
         if not reply or not reply.strip():
             _record_model_failure(model, err)
 
         if not reply or not reply.strip():
             chain = _get_fallback_chain(model, tier)
             if reason == "vision":
-                chain = [fallback for fallback in chain if fallback.get("id") in VISION_MODEL_IDS]
+                chain = [fallback for fallback in chain if fallback.get("id") in VISION_MODEL_IDS and _is_free_model(fallback)]
             for fallback in chain:
                 if not _model_available(fallback):
                     continue
                 log.info("fallback: %s -> %s (%s)", model["label"], fallback["label"], fallback["provider"])
                 fallback_content, _ = _build_content(message, attachments, fallback["id"])
-                reply, err = _call_model(fallback, SYSTEM_PROMPT, fallback_content, max_tok, history)
+                reply, err = _call_model(fallback, _system_prompt(), fallback_content, max_tok, history)
                 if reply and reply.strip():
                     model = fallback
                     break
@@ -3946,7 +4219,7 @@ class Handler(SimpleHTTPRequestHandler):
             return None, None, "name_required"
         if not email or not Handler._AUTH_EMAIL_RE.match(email) or len(email) > 200:
             return None, None, "invalid_email"
-        if not isinstance(password, str) or len(password) < 6 or len(password) > 200:
+        if not isinstance(password, str) or len(password) < 10 or len(password) > 200:
             return None, None, "password_too_short"
         return name, email, password
 
@@ -4076,6 +4349,10 @@ class Handler(SimpleHTTPRequestHandler):
             return
         password = password_or_err
 
+        if _is_admin_email(email):
+            self._json(403, {"error": "email_reserved"})
+            return
+
         # Uniqueness check. We do not leak whether the email exists when
         # the lookup races a parallel insert — that race is harmless and
         # the unique constraint catches it deterministically.
@@ -4114,7 +4391,12 @@ class Handler(SimpleHTTPRequestHandler):
         token = self._issue_session(user_id)
         user = _get_user_by_token(token)
         log.info("auth.register: user=%s email=%s ip=%s", user_id, email, ip_hash[:8])
-        self._json(201, {"user": _public_user_payload(user), "token": token})
+        # Session lives in HttpOnly cookie; body keeps user only (no token for XSS theft).
+        self._json(
+            201,
+            {"user": _public_user_payload(user), "ok": True},
+            extra_cookies=[self._auth_session_cookie(token)],
+        )
 
     def _handle_login(self):
         try:
@@ -4149,7 +4431,11 @@ class Handler(SimpleHTTPRequestHandler):
         token = self._issue_session(row["id"])
         user = _get_user_by_token(token)
         log.info("auth.login: user=%s email=%s ip=%s", row["id"], email, ip_hash[:8])
-        self._json(200, {"user": _public_user_payload(user), "token": token})
+        self._json(
+            200,
+            {"user": _public_user_payload(user), "ok": True},
+            extra_cookies=[self._auth_session_cookie(token)],
+        )
 
     def _handle_logout(self):
         token = self._get_token()
@@ -4160,7 +4446,88 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.commit()
             finally:
                 conn.close()
-        self._json(200, {"ok": True})
+        self._json(200, {"ok": True}, extra_cookies=[self._clear_auth_cookie()])
+
+    def _handle_agent_turn(self):
+        """POST /api/agent/turn — shared multi-agent entry (chat + voice clients).
+
+        Body: {channel, message, session_id?, history?, attachments?}
+        Voice uses channel=voice (RAG-first, spoken trim, LangWatch-oriented spans).
+        Chat uses channel=chat (Langfuse-oriented spans when keys are set).
+        """
+        if not _agent_runtime_enabled():
+            self._json(503, {"error": "agent_runtime_disabled"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length > MAX_BODY_BYTES:
+            self._json(413, {"error": "payload_too_large"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+
+        ip_hash = _hash_ip(self._client_ip())
+        if not _check_auth_rate(ip_hash, "chat"):
+            self._json(429, {"error": "rate_limit", "message": "Too many requests. Try again later."})
+            return
+
+        channel = _clean(body.get("channel") or "chat", 16).lower() or "chat"
+        if channel not in ("chat", "voice"):
+            channel = "chat"
+        message = _clean(body.get("message"), 12000 if channel == "chat" else 2000)
+        session_id = _clean(body.get("session_id"), 128) or self._get_session() or uuid.uuid4().hex
+        history = body.get("history", [])
+        if not isinstance(history, list):
+            history = []
+        history = history[-20:]
+        attachments = _sanitize_attachments(body.get("attachments", [])) if channel == "chat" else []
+
+        if not message and not attachments:
+            self._json(400, {"error": "empty_message"})
+            return
+
+        deps = AgentDeps(
+            general_generate=_chat_general_generate if channel == "chat" else None,
+            image_generate=_chat_image_generate if channel == "chat" else None,
+        )
+        req = TurnRequest(
+            channel=channel,
+            message=message,
+            session_id=session_id,
+            history=history,
+            attachments=attachments,
+            metadata={"via": "api_agent_turn", "ip_hash": ip_hash},
+        )
+        try:
+            turn = run_turn(req, deps)
+        except Exception as exc:
+            log.exception("api_agent_turn_failed: %s", exc)
+            self._json(502, {"error": "agent_turn_failed"})
+            return
+
+        log.info(
+            "api_agent_turn channel=%s intent=%s agents=%s trace=%s ms=%s",
+            channel,
+            turn.route_intent,
+            turn.agents_used,
+            (turn.trace_id or "")[:12],
+            turn.latency_ms,
+        )
+        payload = turn.to_public_dict()
+        # Voice clients historically expect answer/spoken keys.
+        if channel == "voice":
+            payload["answer"] = turn.reply
+            payload["answer_full"] = turn.reply
+            if turn.spoken:
+                payload["spoken"] = turn.spoken
+            else:
+                payload["spoken"] = turn.reply
+        self._json(200, payload)
 
     def _handle_challenge(self):
         try:
