@@ -1153,6 +1153,17 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260702-youtube-forum"></script>
+    <!-- Voice Agent — local $0 voice pipeline (STT + RAG brain + Kokoro TTS), same-origin via nginx /voice-api/.
+         Self-contained Shadow-DOM widget: a pure voice-only orb (no chat) that sits to the LEFT of the
+         text-chat FAB (right:100/bottom:58 aligns its orb centre with the 64px chat FAB at right:20/bottom:56,
+         16px gap) so the two launchers read as a symmetric pair.
+         Uses blob-URL audio so the site CSP (media-src 'self' blob:) is untouched. -->
+    <script>
+      window.VOICE_AGENT_API = '/voice-api';
+      window.VOICE_AGENT_POS = { right: 100, bottom: 58 };
+    </script>
+    <script src="/voice-api/widget.js" defer></script>
+
+    <script src="script.js?v=20260813-voice-restore"></script>
 </body>
 </html>
