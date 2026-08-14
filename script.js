@@ -1736,7 +1736,15 @@
 
 
     // ─── RAG Hallucination Tester ───
-    function openModal(modal) { if (modal) modal.classList.add('active'); }
+    // Closes any other full-screen overlay modal before a new one opens, so two
+    // AI Lab tool modals can never be active at once (they'd otherwise stack and
+    // steal each other's input).
+    function closeAllOverlayModals() {
+        document.querySelectorAll('.diff-modal.active, .json-modal.active').forEach(function (m) {
+            m.classList.remove('active');
+        });
+    }
+    function openModal(modal) { if (modal) { closeAllOverlayModals(); modal.classList.add('active'); } }
     function closeModal(modal) { if (modal) modal.classList.remove('active'); }
 
     var HALLUCINATION_MAX_CHARS = 80000;
@@ -1995,6 +2003,7 @@
         var emailEl = document.getElementById('digest-modal-email');
         function openDigest(e) {
             if (e) e.preventDefault();
+            closeAllOverlayModals();
             modal.classList.add('active');
             document.body.style.overflow = 'hidden';
             if (emailEl) setTimeout(function () { try { emailEl.focus(); } catch (err) {} }, 60);
@@ -2149,6 +2158,7 @@
             if (!forumModal) return;
             var h = getHandle();
             if (forumHandleDisplay) forumHandleDisplay.textContent = h;
+            closeAllOverlayModals();
             forumModal.classList.add('active');
             document.body.style.overflow = 'hidden';
             loadPosts();
@@ -4095,6 +4105,7 @@
 
         // Open as modal overlay
         function openChallengePlayground() {
+            closeAllOverlayModals();
             challengeModal.classList.add('active');
             document.body.style.overflow = 'hidden';
             updateSystemPrompt();
@@ -4381,6 +4392,7 @@
     }
 
     document.getElementById('open-attackgen-btn').addEventListener('click', function () {
+        closeAllOverlayModals();
         attackgenModal.classList.add('active');
     });
     document.getElementById('attackgen-modal-close').addEventListener('click', function () {
