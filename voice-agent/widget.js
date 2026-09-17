@@ -89,34 +89,45 @@
     offline: 'Voice service is unavailable right now', connecting: ''
   };
 
-  function positionLauncherWithNewsletter() {
+  function positionLauncherWithFooter() {
     positionFrame = 0;
     if (open) {
       launcher.style.removeProperty('bottom');
+      launcher.style.removeProperty('left');
+      launcher.style.removeProperty('right');
       return;
     }
 
-    var newsletter = document.querySelector('.newsletter-input-wrap');
-    if (!newsletter) {
+    var forum = document.querySelector('.footer-forum-wrap');
+    if (!forum || window.innerWidth < 1100) {
       launcher.style.removeProperty('bottom');
+      launcher.style.removeProperty('left');
+      launcher.style.removeProperty('right');
       return;
     }
 
-    var rect = newsletter.getBoundingClientRect();
+    var rect = forum.getBoundingClientRect();
     if (rect.bottom <= 0 || rect.top >= window.innerHeight) {
       launcher.style.removeProperty('bottom');
+      launcher.style.removeProperty('left');
+      launcher.style.removeProperty('right');
       return;
     }
 
     var launcherHeight = launcher.offsetHeight || 60;
-    var targetTop = rect.top + 18;
+    var launcherWidth = launcher.offsetWidth || 190;
+    var targetTop = rect.bottom + 8;
+    var targetLeft = rect.left + (rect.width - launcherWidth) / 2;
     var targetBottom = window.innerHeight - targetTop - launcherHeight;
+    targetLeft = Math.max(12, Math.min(window.innerWidth - launcherWidth - 12, targetLeft));
     launcher.style.bottom = Math.max(12, targetBottom) + 'px';
+    launcher.style.left = targetLeft + 'px';
+    launcher.style.right = 'auto';
   }
 
   function scheduleLauncherPosition() {
     if (positionFrame) return;
-    positionFrame = window.requestAnimationFrame(positionLauncherWithNewsletter);
+    positionFrame = window.requestAnimationFrame(positionLauncherWithFooter);
   }
 
   window.addEventListener('scroll', scheduleLauncherPosition, { passive: true });

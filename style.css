@@ -2899,7 +2899,7 @@ body.light-mode .challenge-verdict-card.verdict-safe { background: rgba(16,185,1
 
 /* ─── Footer ─── */
 .footer {
-    padding: 1.5rem 0;
+    padding: 0.75rem 0;
     border-top: 1px solid var(--border);
 }
 
@@ -2909,6 +2909,40 @@ body.light-mode .challenge-verdict-card.verdict-safe { background: rgba(16,185,1
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 0.5rem;
+}
+
+@media (min-width: 1100px) {
+    .footer-inner {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.25fr) minmax(380px, 1fr);
+        grid-template-areas:
+            "brand forum newsletter"
+            "socials . email";
+        gap: 0.55rem 2rem;
+    }
+
+    .footer-brand { grid-area: brand; }
+    .newsletter-wrap {
+        grid-area: newsletter;
+        justify-self: start;
+        width: min(100%, 330px);
+        min-width: 0;
+    }
+    .footer-forum-wrap { grid-area: forum; }
+    .footer-socials { grid-area: socials; }
+    .footer-copy-email {
+        grid-area: email;
+        justify-self: start;
+        width: min(100%, 330px);
+    }
+
+    .footer .newsletter-form { margin: 0; }
+    .footer .newsletter-label { margin-bottom: 0.35rem; }
+    .footer .newsletter-msg { min-height: 0; margin-top: 0; }
+    .footer .footer-forum-wrap { width: auto; margin: 0; }
+    .footer .footer-copy-email { width: auto; margin: 0; }
+    .footer .newsletter-input-wrap { max-width: 330px; }
+    .footer #newsletter-btn { padding: 0.48rem 0.8rem; }
 }
 
 .footer-brand {
@@ -3661,11 +3695,11 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 .admin-reply-form textarea:focus { border-color: var(--accent); }
 
 /* ─── Chat Widget ─── */
-.chat-widget { position: fixed; bottom: 56px; right: 20px; z-index: 9999; }
+.chat-widget { position: fixed; bottom: 56px; right: 28px; z-index: 9999; }
 
 .chat-toggle {
-    width: 64px; height: 64px; border-radius: 50%; background: var(--gradient);
-    border: none; color: #fff; font-size: 1.6rem; cursor: pointer;
+    width: 72px; height: 72px; border-radius: 50%; background: var(--gradient);
+    border: none; color: #fff; font-size: 1.75rem; cursor: pointer;
     box-shadow: 0 4px 20px var(--accent-glow); transition: var(--transition);
     display: flex; align-items: center; justify-content: center;
     position: relative; animation: chatPulse 3s ease-in-out infinite;
