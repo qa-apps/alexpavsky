@@ -1154,15 +1154,18 @@
     </div>
 
     <!-- Voice Agent — local $0 voice pipeline (STT + RAG brain + Kokoro TTS), same-origin via nginx /voice-api/.
-         Self-contained Shadow-DOM widget: a pure voice-only orb (no chat) that sits to the LEFT of the
-         text-chat FAB (right:100/bottom:58 aligns its orb centre with the 64px chat FAB at right:20/bottom:56,
-         16px gap) so the two launchers read as a symmetric pair.
+         Self-contained Shadow-DOM widget: a pure voice-only orb (no chat) that stays beside the chat launcher
+         when closed, then shifts left and above the footer controls while the text chat is open.
          Uses blob-URL audio so the site CSP (media-src 'self' blob:) is untouched. -->
     <script>
       window.VOICE_AGENT_API = '/voice-api';
-      window.VOICE_AGENT_POS = { right: 100, bottom: 58 };
+      window.VOICE_AGENT_POS = { right: 100, bottom: 12 };
+      window.VOICE_AGENT_CHAT_OPEN_POS = {
+        right: 'calc(min(560px, 50vw) + 48px)',
+        bottom: 116
+      };
     </script>
-    <script src="/voice-api/widget.js" defer></script>
+    <script src="/voice-api/widget.js?v=20260917-layout" defer></script>
 
     <script src="script.js?v=20260813-voice-restore"></script>
 </body>
