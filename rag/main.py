@@ -30,6 +30,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
 try:
+    from .safety import safety_response
+except ImportError:  # Docker starts uvicorn from inside /app.
+    from safety import safety_response
+
+try:
     import PyPDF2
 except ImportError:
     PyPDF2 = None  # type: ignore
@@ -406,6 +411,18 @@ async def rag_query(req: QueryRequest):
     """
     if not req.query.strip():
         raise HTTPException(400, "query must not be empty")
+
+    blocked_answer = safety_response(req.query)
+    if blocked_answer:
+        return {
+            "answer": blocked_answer,
+            "sources": [],
+            "contexts": [],
+            "metrics": {"faithfulness": 0.0, "answer_relevancy": 1.0},
+            "pgvector_results": [],
+            "qdrant_results": [],
+            "safety_blocked": True,
+        }
 
     query_vec = embed_one(req.query)
 
