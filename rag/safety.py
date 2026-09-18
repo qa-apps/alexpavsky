@@ -94,11 +94,16 @@ _DEMOGRAPHIC_RESPONSE = (
 
 
 def _normalize(text: str) -> str:
-    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = unicodedata.normalize("NFKC", text or "").casefold()
     normalized = "".join(
         char for char in normalized if unicodedata.category(char) != "Cf"
     )
     normalized = normalized.translate(_CONFUSABLE_TRANSLATION)
+    normalized = re.sub(
+        r"\b(?:[a-z][^a-z0-9\s]){2,}[a-z]\b",
+        lambda match: re.sub(r"[^a-z0-9]", "", match.group()),
+        normalized,
+    )
     return " ".join(normalized.split())
 
 
