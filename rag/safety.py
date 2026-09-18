@@ -55,6 +55,12 @@ _HARMFUL_RE = re.compile(
     r"firearms?|weapons?|bombs?|explosives?|malware|ransomware|ddos|"
     r"denial\s+of\s+service|remote\s+code\s+execution|"
     r"bank(?:'s)?\s+online\s+systems?|phishing\s+(?:email|campaign))\b)|"
+    r"(?:\b(?:chemical\s+weapons?|harmful\s+(?:toxins?|substances?)|poisons?|"
+    r"firearms?|weapons?|bombs?|explosives?|malware|ransomware|ddos|"
+    r"denial\s+of\s+service|remote\s+code\s+execution|"
+    r"bank(?:'s)?\s+online\s+systems?|phishing\s+(?:email|campaign))\b.{0,140}"
+    r"\b(?:step[ -]?by[ -]?step|instructions?|guide|script|code|how\s+to|"
+    r"give\s+me|provide|build|craft|create|make|synthesi[sz]e|launch|exploit|hack)\b)|"
     r"(?:\b(?:hack|compromise|take\s+over|break\s+into)\b.{0,100}"
     r"\b(?:accounts?|websites?|systems?|networks?|banks?)\b)",
     re.IGNORECASE | re.DOTALL,
