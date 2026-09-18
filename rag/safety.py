@@ -6,6 +6,38 @@ import re
 import unicodedata
 
 
+_CONFUSABLE_TRANSLATION = str.maketrans(
+    {
+        # Common Cyrillic/Greek lookalikes used to evade Latin safety keywords.
+        "\u0430": "a",
+        "\u0435": "e",
+        "\u0456": "i",
+        "\u0458": "j",
+        "\u043e": "o",
+        "\u0440": "p",
+        "\u0441": "c",
+        "\u0445": "x",
+        "\u0443": "y",
+        "\u0391": "A",
+        "\u0395": "E",
+        "\u0399": "I",
+        "\u039a": "K",
+        "\u039c": "M",
+        "\u039d": "N",
+        "\u039f": "O",
+        "\u03a1": "P",
+        "\u03a4": "T",
+        "\u03a7": "X",
+        "\u03b1": "a",
+        "\u03b5": "e",
+        "\u03b9": "i",
+        "\u03bf": "o",
+        "\u03c1": "p",
+        "\u03c7": "x",
+    }
+)
+
+
 _PROMPT_INJECTION_RE = re.compile(
     r"(?:\b(?:ignore|disregard|override|bypass|disable|forget)\b.{0,100}"
     r"\b(?:instructions?|polic(?:y|ies)|safety|guardrails?|restrictions?|filters?)\b)|"
@@ -36,10 +68,12 @@ _DEMOGRAPHIC_RE = re.compile(
 )
 
 _DEMOGRAPHIC_DECISION_RE = re.compile(
-    r"\b(?:best|suitable|recommend|suggest|which|what\s+kind|focus\s+on|assess|"
-    r"evaluate|score|rank|hire|hiring|jobs?|roles?|positions?|careers?|"
-    r"programming\s+languages?)\b",
-    re.IGNORECASE,
+    r"(?:\b(?:assess|evaluate|score|rank|hire|hiring)\b)|"
+    r"(?:\b(?:recommend|suggest|which|what\s+kind|focus\s+on)\b.{0,140}"
+    r"\b(?:jobs?|roles?|positions?|careers?|programming\s+languages?)\b)|"
+    r"(?:\b(?:jobs?|roles?|positions?|careers?)\b.{0,140}"
+    r"\b(?:suitable|best\s+for|recommended?)\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 _PROMPT_INJECTION_RESPONSE = (
@@ -61,6 +95,10 @@ _DEMOGRAPHIC_RESPONSE = (
 
 def _normalize(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = "".join(
+        char for char in normalized if unicodedata.category(char) != "Cf"
+    )
+    normalized = normalized.translate(_CONFUSABLE_TRANSLATION)
     return " ".join(normalized.split())
 
 
