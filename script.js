@@ -2219,15 +2219,25 @@
 
     var authToken = localStorage.getItem('auth_token') || '';
     var currentUser = null;
+    // Login/register now authenticate via an httpOnly session cookie and no
+    // longer return a bearer token. This flag stands in for "we believe we're
+    // logged in" (gates the reload bootstrap check and dashboard loads) without
+    // being sent as a credential. A real token, if the backend ever sends one
+    // again, still takes priority in authHeaders().
+    var COOKIE_SESSION_FLAG = 'cookie-session';
 
     function authHeaders() {
-        return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken };
+        var headers = { 'Content-Type': 'application/json' };
+        if (authToken && authToken !== 'undefined' && authToken !== COOKIE_SESSION_FLAG) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        }
+        return headers;
     }
 
     function setLoggedIn(user, token) {
-        authToken = token;
+        authToken = (token && token !== 'undefined') ? token : COOKIE_SESSION_FLAG;
         currentUser = user;
-        localStorage.setItem('auth_token', token);
+        localStorage.setItem('auth_token', authToken);
         if (authBtn) authBtn.style.display = 'none';
         if (userMenu) userMenu.style.display = '';
         if (userDisplayName) userDisplayName.textContent = user.name.split(' ')[0];
