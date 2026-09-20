@@ -54,6 +54,18 @@ _auth_rate_lock = threading.Lock()
 _auth_rate_buckets = {}
 
 
+def _as_json_object(value):
+    """Return a parsed request body, rejecting any JSON that is not an object.
+
+    json.loads happily returns str/int/list/None for valid non-object JSON.
+    Callers index the result with .get(), so anything else must be refused at
+    the parse site while the surrounding try can still answer 400.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("request body must be a JSON object")
+    return value
+
+
 def _pg_enabled():
     return bool(DATABASE_URL)
 
@@ -3658,7 +3670,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/maintenance-login":
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+                body = _as_json_object(json.loads(self.rfile.read(length).decode()) if length > 0 else {})
                 key = body.get("key", "").strip()
                 if key == MAINTENANCE_KEY:
                     cookie_on = self._maintenance_cookie(MAINTENANCE_KEY, 2592000)
@@ -3677,7 +3689,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/agent-reports":
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+                body = _as_json_object(json.loads(self.rfile.read(length).decode()) if length > 0 else {})
             except Exception:
                 self._json(400, {"error": "invalid_json"})
                 return
@@ -3754,7 +3766,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         try:
-            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+            body = _as_json_object(json.loads(self.rfile.read(length).decode()) if length > 0 else {})
         except Exception:
             self._json(400, {"error": "invalid_json"})
             return
@@ -4171,7 +4183,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(413, {"error": "payload_too_large"})
             return
         try:
-            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+            body = _as_json_object(json.loads(self.rfile.read(length).decode()) if length > 0 else {})
         except Exception:
             self._json(400, {"error": "invalid_json"})
             return
@@ -4482,7 +4494,7 @@ CRITICAL RULES:
             self._json(413, {"error": "payload_too_large"})
             return
         try:
-            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+            body = _as_json_object(json.loads(self.rfile.read(length).decode()) if length > 0 else {})
         except Exception:
             self._json(400, {"error": "invalid_json"})
             return
@@ -4655,7 +4667,7 @@ CRITICAL RULES:
             self._json(413, {"error": "payload_too_large"})
             return
         try:
-            body = json.loads(self.rfile.read(length).decode()) if length > 0 else {}
+            body = _as_json_object(json.loads(self.rfile.read(length).decode()) if length > 0 else {})
         except Exception:
             self._json(400, {"error": "invalid_json"})
             return
