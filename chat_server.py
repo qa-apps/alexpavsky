@@ -28,6 +28,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
+try:  # Langfuse tracing for /api/chat; no-op without LANGFUSE_* keys
+    import langfuse_tracer
+except Exception:  # pragma: no cover
+    langfuse_tracer = None
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -464,11 +469,23 @@ def _get_user_by_token(token):
 
 
 def _check_auth_rate(ip_hash, action):
+    """Sliding-window rate limits per IP hash.
+
+    Windows are (seconds, max_requests). Defaults are intentionally strict for
+    auth and spend-sensitive endpoints (chat burns provider API quota).
+    """
     now = time.time()
     windows = {
-        "register": (3600, 100),
+        "register": (3600, 10),   # 10 registrations / hour
+        "login": (900, 10),       # 10 logins / 15 min
+        "forgot": (3600, 5),      # 5 password-reset requests / hour
+        "forum": (3600, 30),
+        "subscribe": (3600, 20),
+        "chat": (3600, 60),       # 60 chat messages / hour
+        "challenge": (3600, 30),
+        "attack": (3600, 20),
     }
-    window, limit = windows.get(action, (3600, 100))
+    window, limit = windows.get(action, (3600, 60))
     key = (action, ip_hash)
     with _auth_rate_lock:
         bucket = _auth_rate_buckets.setdefault(key, [])
@@ -480,11 +497,12 @@ def _check_auth_rate(ip_hash, action):
 
 
 def _admin_login_emails():
+    # No hardcoded personal emails — set ADMIN_LOGIN_EMAILS / ADMIN_EMAIL in env.
     raw = (
         os.environ.get("ADMIN_LOGIN_EMAILS")
         or os.environ.get("ADMIN_LOGIN_EMAIL")
         or os.environ.get("ADMIN_EMAIL")
-        or "alex@alexpavsky.com,alex.pavsky@gmail.com"
+        or ""
     )
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
@@ -566,9 +584,7 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
 SAMBANOVA_API_URL = "https://api.sambanova.ai/v1/chat/completions"
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_INTERACTIONS_API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
-GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image").strip() or "gemini-3.1-flash-image"
+NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 OPENROUTER_REFERER = "https://alexpavsky.com"
 OPENROUTER_TITLE = "AlexPavsky AI Chat"
 RSS2JSON_API_URL = "https://api.rss2json.com/v1/api.json?rss_url="
@@ -610,15 +626,18 @@ CATEGORY_LABELS = {
 PROVIDER_KEY_ENV = {
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "huggingface": "HF_TOKEN",
+    "huggingface": "HF_INFERENCE_TOKEN",
     "cerebras": "CEREBRAS_API_KEY",
     "sambanova": "SAMBANOVA_API_KEY",
     "mistral": "MISTRAL_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
+    "cohere": "COHERE_API_KEY",
+    "github": "GITHUB_MODELS_TOKEN",
+    "cloudflare": "CLOUDFLARE_API_TOKEN",
 }
 
 PROVIDER_KEY_ALIASES = {
-    "huggingface": ("HUGGINGFACE_API_KEY",),
+    "huggingface": ("HF_TOKEN", "HUGGINGFACE_API_KEY"),
     "cerebras": ("CEREBRES_API_KEY",),
     "sambanova": ("SAMBA_API_KEY",),
 }
@@ -630,7 +649,28 @@ PROVIDER_API_URL = {
     "cerebras": CEREBRAS_API_URL,
     "sambanova": SAMBANOVA_API_URL,
     "mistral": MISTRAL_API_URL,
+    "nvidia": NVIDIA_API_URL,
+    "cohere": "https://api.cohere.ai/compatibility/v1/chat/completions",
+    "github": "https://models.github.ai/inference/chat/completions",
+    "local": os.environ.get("BOSGAME_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/") + "/v1/chat/completions",
 }
+
+_BLOCKED_PAID_PROVIDERS = {"gemini", "openai", "anthropic", "azure", "vertex"}
+_APPROVED_FREE_DIRECT_PROVIDERS = {
+    "nvidia", "groq", "huggingface", "mistral", "cohere", "cloudflare", "local",
+}
+
+
+def _site_route_allowed(model):
+    if not model:
+        return False
+    provider = str(model.get("provider", ""))
+    model_id = str(model.get("id", ""))
+    if provider in _BLOCKED_PAID_PROVIDERS:
+        return False
+    if provider == "openrouter":
+        return bool(model.get("free")) and model_id.endswith(":free")
+    return bool(model.get("free")) and provider in _APPROVED_FREE_DIRECT_PROVIDERS
 
 def _provider_env_names(provider):
     primary = PROVIDER_KEY_ENV.get(provider) or f"{str(provider).upper().replace('-', '_')}_API_KEY"
@@ -638,6 +678,8 @@ def _provider_env_names(provider):
     return (primary,) + tuple(name for name in extras if name != primary)
 
 def _provider_api_key(provider):
+    if provider in _BLOCKED_PAID_PROVIDERS:
+        return ""
     for env_name in _provider_env_names(provider):
         value = (os.environ.get(env_name) or "").strip()
         if value:
@@ -649,11 +691,7 @@ def _model_env(name, default):
     return value or default
 
 _STATIC_MODELS = [
-    {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "S"},
-    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
-    {"id": "gemini-3.1-flash-lite", "label": "Gemini 3 Flash", "provider": "gemini", "free": True, "vision": True, "tier": "M"},
-    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "provider": "gemini", "free": True, "vision": True, "tier": "H"},
-    {"id": "gemini-3-pro-preview", "label": "Gemini 3 Pro", "provider": "gemini", "free": True, "vision": True, "tier": "H"},
+    {"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "label": "NVIDIA Nemotron 3 Nano", "provider": "nvidia", "free": True, "tier": "M", "coding": True},
     {"id": "google/gemma-3-27b-it:free", "label": "Gemma 3 27B", "provider": "openrouter", "free": True, "tier": "S"},
     {"id": "mistralai/mistral-small-3.1-24b-instruct:free", "label": "Mistral Small 24B", "provider": "openrouter", "free": True, "tier": "S"},
     {"id": "stepfun/step-3.5-flash:free", "label": "Step 3.5 Flash", "provider": "openrouter", "free": True, "tier": "S"},
@@ -681,7 +719,17 @@ _STATIC_MODELS = [
     {"id": "openai/gpt-oss-120b", "label": "GPT-OSS 120B", "provider": "groq", "tier": "H"},
     {"id": "groq/compound", "label": "Compound AI", "provider": "groq", "search": True, "tier": "H"},
     {"id": "groq/compound-mini", "label": "Compound Mini", "provider": "groq", "search": True, "tier": "M"},
+    {"id": "gpt-oss:120b", "label": "Local GPT-OSS 120B", "provider": "local", "free": True, "tier": "H", "reasoning": True},
 ]
+
+_LOCAL_FALLBACK_MODEL = {
+    "id": "gpt-oss:120b",
+    "label": "Local GPT-OSS 120B",
+    "provider": "local",
+    "free": True,
+    "tier": "H",
+    "reasoning": True,
+}
 
 # Dynamic lists (will be overwritten by _update_global_models)
 CHAT_MODELS = []
@@ -696,14 +744,61 @@ SEARCH_MODELS = []
 import threading
 _model_lock = threading.Lock()
 
+# ── Curator handoff ──────────────────────────────────────────────────────────
+# model_curator.py sweeps every ~60h and writes a vetted free-model registry plus
+# a quarantine of dead/discontinued/restricted ids. We boot the pool from the
+# registry (so a restart comes up already-clean instead of re-discovering dead
+# models) and always subtract the quarantine so no code path can route to a model
+# the curator proved dead. Files are optional — absent ⇒ fall back to the seed.
+_CURATOR_DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path.home() / "alexpavsky-data")))
+_CURATOR_REGISTRY_FILE = _CURATOR_DATA_DIR / "models_registry.json"
+_CURATOR_QUARANTINE_FILE = _CURATOR_DATA_DIR / "models_quarantine.json"
+
+
+def _curator_registry_models():
+    """Vetted free models from the last curator sweep (empty if no sweep yet)."""
+    try:
+        data = json.loads(_CURATOR_REGISTRY_FILE.read_text())
+        return [m for m in data.get("models", []) if m.get("id") and m.get("tier")]
+    except (OSError, ValueError):
+        return []
+
+
+def _curator_quarantined_ids():
+    """Model ids the curator proved dead/restricted — excluded from routing."""
+    try:
+        return set(json.loads(_CURATOR_QUARANTINE_FILE.read_text()).keys())
+    except (OSError, ValueError, AttributeError):
+        return set()
+
+
+def _initial_model_pool():
+    """Boot from the curator's vetted registry when present, else the static seed.
+    When curated, the static seed is NOT merged back in — that is how dead-key
+    providers get out of rotation until the curator re-verifies them."""
+    curated = _curator_registry_models()
+    models = curated if curated else _STATIC_MODELS.copy()
+    if not any(
+        model.get("provider") == "local" and model.get("id") == _LOCAL_FALLBACK_MODEL["id"]
+        for model in models
+    ):
+        models.append(_LOCAL_FALLBACK_MODEL.copy())
+    return models
+
+
 def _update_global_models(new_models):
     global CHAT_MODELS, MODEL_BY_ID, VISION_MODEL_IDS
     global TIER_S, TIER_M, TIER_H, CODING_MODELS, SEARCH_MODELS
 
     with _model_lock:
+        new_models = [model for model in new_models if _site_route_allowed(model)]
+        # Drop anything the curator quarantined (dead / discontinued / restricted).
+        banned = _curator_quarantined_ids()
+        if banned:
+            new_models = [m for m in new_models if m.get("id") not in banned]
         # Sort by 'created' timestamp descending (newest first)
         new_models.sort(key=lambda m: m.get("created", 0), reverse=True)
-        
+
         CHAT_MODELS = new_models
         MODEL_BY_ID = {m["id"]: m for m in CHAT_MODELS}
         VISION_MODEL_IDS = {m["id"] for m in CHAT_MODELS if m.get("vision")}
@@ -713,122 +808,18 @@ def _update_global_models(new_models):
         CODING_MODELS = [m for m in CHAT_MODELS if m.get("coding")]
         SEARCH_MODELS = [m for m in CHAT_MODELS if m.get("search")]
 
-_update_global_models(_STATIC_MODELS.copy())
+_update_global_models(_initial_model_pool())
 
 def _sync_dynamic_models():
-    """Fetch free models from OpenRouter and Hugging Face, categorize them, and update global lists."""
-    import urllib.request
-    import json
-    import datetime
-    
-    dynamic_models = []
-    
-    # 1. Fetch OpenRouter
-    try:
-        req = urllib.request.Request("https://openrouter.ai/api/v1/models")
-        with urllib.request.urlopen(req, timeout=15) as res:
-            data = json.loads(res.read().decode())
-        
-        for m in data.get("data", []):
-            pricing = m.get("pricing", {})
-            if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
-                m_id = m.get("id", "")
-                if not m_id.endswith(":free"):
-                    continue
-                m_name = m.get("name", "")
-                lower_id = m_id.lower()
-                lower_name = m_name.lower()
-                created = int(m.get("created", 0))
-                
-                if "test" in lower_id or "experimental" in lower_id:
-                    continue
-                
-                model_obj = {
-                    "id": m_id,
-                    "label": m_name,
-                    "provider": "openrouter",
-                    "free": True,
-                    "created": created
-                }
-                
-                if "vision" in lower_id or "vision" in lower_name:
-                    model_obj["vision"] = True
-                if "coder" in lower_id or "code" in lower_id or "coder" in lower_name:
-                    model_obj["coding"] = True
-                if "r1" in lower_id or "reason" in lower_id or "think" in lower_id:
-                    model_obj["reasoning"] = True
-                
-                ctx_len = int(m.get("context_length", 0))
-                if ctx_len >= 64000 or "70b" in lower_id or "405b" in lower_id or "r1" in lower_id:
-                    model_obj["tier"] = "H"
-                elif ctx_len >= 16000 or "27b" in lower_id or "32b" in lower_id:
-                    model_obj["tier"] = "M"
-                else:
-                    model_obj["tier"] = "S"
-                    
-                dynamic_models.append(model_obj)
-    except Exception as e:
-        log.error("Failed to sync OpenRouter models: %s", e)
-        
-    # 2. Fetch Hugging Face
-    try:
-        req = urllib.request.Request("https://huggingface.co/api/models?pipeline_tag=text-generation&sort=downloads&direction=-1&limit=30")
-        with urllib.request.urlopen(req, timeout=15) as res:
-            hf_data = json.loads(res.read().decode())
-            
-        for m in hf_data:
-            m_id = m.get("id", "")
-            m_name = m_id.split("/")[-1]
-            lower_id = m_id.lower()
-            
-            created_str = m.get("createdAt", "")
-            created = 0
-            if created_str:
-                try:
-                    dt = datetime.datetime.strptime(created_str.split(".")[0], "%Y-%m-%dT%H:%M:%S")
-                    created = int(dt.timestamp())
-                except:
-                    pass
-            
-            if "test" in lower_id or "experimental" in lower_id or "gpt2" in lower_id or "opt" in lower_id:
-                continue
-                
-            model_obj = {
-                "id": m_id,
-                "label": f"HF {m_name}",
-                "provider": "huggingface",
-                "free": True,
-                "created": created
-            }
-            
-            if "vision" in lower_id:
-                model_obj["vision"] = True
-            if "coder" in lower_id or "code" in lower_id:
-                model_obj["coding"] = True
-            if "r1" in lower_id or "reason" in lower_id or "think" in lower_id:
-                model_obj["reasoning"] = True
-                
-            if "70b" in lower_id or "72b" in lower_id or "120b" in lower_id or "r1" in lower_id:
-                model_obj["tier"] = "H"
-            elif "27b" in lower_id or "32b" in lower_id or "34b" in lower_id or "14b" in lower_id:
-                model_obj["tier"] = "M"
-            else:
-                model_obj["tier"] = "S"
-                
-            dynamic_models.append(model_obj)
-    except Exception as e:
-        log.error("Failed to sync Hugging Face models: %s", e)
-        
-    # Merge with static models
-    merged = _STATIC_MODELS.copy()
-    static_ids = {sm["id"] for sm in merged}
-    
-    for dm in dynamic_models:
-        if dm["id"] not in static_ids:
-            merged.append(dm)
-            
-    _update_global_models(merged)
-    log.info("Synced %d dynamic models (Total: %d)", len(dynamic_models), len(merged))
+    """Reload only the curator-vetted pool.
+
+    The old in-process sync appended unprobed Hugging Face models and could put
+    unavailable endpoints back into rotation. Discovery and probing now belong
+    exclusively to model_curator.py.
+    """
+    models = _initial_model_pool()
+    _update_global_models(models)
+    log.info("Reloaded %d curator-vetted models", len(models))
 
 MAX_ATTACHMENTS = 4
 MAX_TEXT_CHARS = 12000
@@ -2287,7 +2278,7 @@ def _youtube_cached_videos() -> list:
     return videos
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_BASE = (
     "You are a helpful AI assistant on Alex Pavsky's personal tech hub. "
     "You can answer questions on any topic — QA, AI testing, coding, science, history, math, languages, or casual chat. "
     "Be concise, friendly, and accurate. Format code in fenced blocks with language tags. "
@@ -2307,6 +2298,11 @@ SYSTEM_PROMPT = (
     "If the user asks to generate an image, say that the site will use its image-generation endpoint or explain availability in plain text. "
     "Answer in the user's language when possible."
 )
+
+
+def _system_prompt():
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"Today's date is {today} (UTC). " + SYSTEM_PROMPT_BASE
 
 PROMPT_EXTRACTION_RE = re.compile(
     r"(?:system|developer|hidden|internal)\s+(?:prompt|instruction|message)|"
@@ -2413,7 +2409,7 @@ MODEL_HEALTH_LOCK = threading.Lock()
 
 
 def _provider_available(provider):
-    return bool(_provider_api_key(provider))
+    return provider == "local" or bool(_provider_api_key(provider))
 
 
 def _parse_retry_seconds(value):
@@ -2483,8 +2479,15 @@ def _model_health_keys(model):
     return keys
 
 
+def _is_free_only_model(model):
+    """Fail closed: only explicitly approved free-tier routes may execute."""
+    return _site_route_allowed(model)
+
+
 def _model_available(model):
-    if not model or not _provider_available(model.get("provider", "groq")):
+    if not _is_free_only_model(model):
+        return False
+    if not _provider_available(model.get("provider", "groq")):
         return False
     now = time.time()
     with MODEL_HEALTH_LOCK:
@@ -2511,11 +2514,8 @@ def _cooldown_target(model, err):
             "free-models-per-day" in body or "requests per day" in body or "daily" in body or "per-day" in body
         ):
             return "pool", _health_key("pool", "openrouter", "free"), _seconds_until_next_utc_day(), "openrouter_free_daily_limit"
-        if provider == "gemini" and ("per day" in body or "requests per day" in body or "daily" in body):
-            return "provider", _health_key("provider", provider), _seconds_until_next_pacific_day(), "gemini_daily_limit"
-        if retry_seconds is not None:
-            return "model", _health_key("model", provider, model_id), min(max(retry_seconds, 1), 3600), "rate_limit"
-        return "model", _health_key("model", provider, model_id), 120, "rate_limit"
+        seconds = min(max(retry_seconds or 120, 30), 3600)
+        return "provider", _health_key("provider", provider), seconds, "free_tier_rate_limit"
 
     if provider == "huggingface" and ("monthly credit" in body or "credits exhausted" in body):
         return "provider", _health_key("provider", provider), _seconds_until_next_utc_month(), "hf_monthly_credits"
@@ -2592,7 +2592,43 @@ def _pick(candidates):
     available = [m for m in candidates if _model_available(m)]
     if not available:
         return None
-        
+
+    # The on-prem model is a quota-proof reserve, not a normal primary route.
+    cloud_available = [m for m in available if m.get("provider") != "local"]
+    if cloud_available:
+        available = cloud_available
+
+    stable_ids = (
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "command-r7b-12-2024",
+        "@cf/ibm-granite/granite-4.0-h-micro",
+        "meta-llama/Llama-3.1-8B-Instruct",
+        "codestral-2508",
+        "meta/llama-3.2-11b-vision-instruct",
+    )
+    for model_id in stable_ids:
+        match = next((m for m in available if m.get("id") == model_id), None)
+        if match:
+            return match
+
+    def uses_visible_reasoning(model):
+        model_id = str(model.get("id", "")).lower()
+        return bool(model.get("reasoning")) or any(
+            marker in model_id for marker in ("qwq", "reasoning", "deepseek-r1", "magistral")
+        )
+
+    non_reasoning = [m for m in available if not uses_visible_reasoning(m)]
+    if non_reasoning:
+        available = non_reasoning
+
+    provider_order = ("groq", "cohere", "cloudflare", "mistral", "huggingface", "nvidia", "openrouter")
+    for provider in provider_order:
+        matches = [m for m in available if m.get("provider") == provider]
+        if matches:
+            available = matches
+            break
+
     n = len(available)
     # Linear decay: newest model gets weight 'n', oldest gets '1'
     weights = [n - i for i in range(n)]
@@ -2606,7 +2642,7 @@ def _route(message, attachments):
     msg_len = len(message)
 
     if has_images:
-        vision_pool = [MODEL_BY_ID.get(i) for i in ("gemini-2.5-pro", "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash") if MODEL_BY_ID.get(i)]
+        vision_pool = [model for model in CHAT_MODELS if model.get("vision")]
         best = _pick(vision_pool)
         if best:
             return best, "H", "vision"
@@ -2781,66 +2817,45 @@ def _build_content(message, attachments, model_id):
     return parts, warning
 
 
-def _content_to_gemini_parts(user_content):
-    parts = []
-    if isinstance(user_content, str):
-        parts.append({"text": user_content})
-    elif isinstance(user_content, list):
-        for item in user_content:
-            if item.get("type") == "text":
-                parts.append({"text": item["text"]})
-            elif item.get("type") == "image_url":
-                data_url = item.get("image_url", {}).get("url", "")
-                if data_url.startswith("data:") and "," in data_url:
-                    header, b64 = data_url.split(",", 1)
-                    mime = header.split(":")[1].split(";")[0] if ":" in header else "image/png"
-                    parts.append({"inline_data": {"mime_type": mime, "data": b64}})
-    return parts
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+_THINK_UNCLOSED_RE = re.compile(r"<think>.*", re.IGNORECASE | re.DOTALL)
 
 
-def _call_gemini(model_id, system_prompt, user_content, api_key, history=None):
-    url = f"{GEMINI_API_URL}/{model_id}:generateContent?key={api_key}"
-    contents = []
-    for h in (history or []):
-        role = "model" if h.get("role") == "assistant" else "user"
-        contents.append({"role": role, "parts": [{"text": h.get("content", "")}]})
-    contents.append({"role": "user", "parts": _content_to_gemini_parts(user_content)})
-    payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
-    }
-    req = Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode())
-    candidates = data.get("candidates", [])
-    if not candidates:
-        return ""
-    return "\n".join(p.get("text", "") for p in candidates[0].get("content", {}).get("parts", []) if p.get("text")).strip()
+def _strip_reasoning(text):
+    # Reasoning models (DeepSeek R1, etc.) sometimes emit their chain-of-thought
+    # as literal <think>...</think> text inside message.content instead of a
+    # separate reasoning field. Never show that to the user. An unclosed tag
+    # (max_tokens cut the response off mid-thought) means everything after it
+    # is reasoning too, so drop the rest of the string in that case.
+    if not text:
+        return text
+    stripped = _THINK_BLOCK_RE.sub("", text)
+    stripped = _THINK_UNCLOSED_RE.sub("", stripped)
+    return stripped.strip()
 
 
 def _extract_reply(data):
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     if isinstance(content, str):
-        return content
+        return _strip_reasoning(content)
     if isinstance(content, list):
-        return "\n".join(i.get("text", "") for i in content if isinstance(i, dict) and i.get("text"))
+        joined = "\n".join(i.get("text", "") for i in content if isinstance(i, dict) and i.get("text"))
+        return _strip_reasoning(joined)
     return ""
 
 
+_LAST_LLM_CALL = threading.local()
+
+
 def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
+    _LAST_LLM_CALL.usage = None
     provider = model.get("provider", "groq")
-    if provider == "openrouter" and not str(model.get("id", "")).endswith(":free"):
-        return None, {"code": "openrouter_paid_disabled", "provider": provider, "model": model.get("id")}
+    if not _is_free_only_model(model):
+        return None, {"code": "paid_model_disabled", "provider": provider, "model": model.get("id")}
     api_key = _provider_api_key(provider)
-    if not api_key:
+    if provider != "local" and not api_key:
         return None, f"missing_{provider}_key"
     try:
-        if provider == "gemini":
-            reply = _call_gemini(model["id"], system_prompt, user_content, api_key, history)
-            if not reply or not reply.strip():
-                return None, {"code": "empty_response", "provider": provider, "model": model.get("id")}
-            return reply, None
         messages = [{"role": "system", "content": system_prompt}]
         for h in (history or []):
             messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
@@ -2851,7 +2866,13 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
             "temperature": 0.7,
             "max_tokens": max_tok,
         }
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "AlexPavsky-Free-Orchestrator/1.0",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         if provider == "openrouter":
             headers["HTTP-Referer"] = OPENROUTER_REFERER
             headers["X-Title"] = OPENROUTER_TITLE
@@ -2863,11 +2884,16 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
             # HF unified router endpoint (supports all HF models)
             base_url = PROVIDER_API_URL["huggingface"]
             payload["model"] = model["id"]
+        elif provider == "cloudflare":
+            # Workers AI needs the account id baked into the OpenAI-compat path.
+            acct = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+            base_url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/v1/chat/completions"
         elif provider in PROVIDER_API_URL:
             base_url = PROVIDER_API_URL[provider]
 
         req = Request(base_url, data=json.dumps(payload).encode(), headers=headers, method="POST")
-        with urlopen(req, timeout=25) as resp:
+        request_timeout = float(os.environ.get("LOCAL_LLM_TIMEOUT", "75")) if provider == "local" else 25
+        with urlopen(req, timeout=request_timeout) as resp:
             raw = resp.read().decode()
             # Guard: some providers return HTML error pages on failure
             if raw.lstrip().startswith("<"):
@@ -2877,7 +2903,9 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
                     "model": model.get("id"),
                     "body": raw[:300],
                 }
-            reply = _extract_reply(json.loads(raw))
+            data = json.loads(raw)
+            _LAST_LLM_CALL.usage = data.get("usage") if isinstance(data, dict) else None
+            reply = _extract_reply(data)
             if not reply or not reply.strip():
                 return None, {"code": "empty_response", "provider": provider, "model": model.get("id"), "body": raw[:300]}
             return reply, None
@@ -2902,18 +2930,41 @@ def _call_model(model, system_prompt, user_content, max_tok=1024, history=None):
 
 
 def _get_fallback_chain(current, tier):
-    tried = {current["id"]}
-    chain = []
+    tried = {(current.get("provider"), current["id"])}
     pool = TIER_S + TIER_M + TIER_H if tier == "S" else TIER_M + TIER_H + TIER_S
-    for m in pool:
-        if m["id"] not in tried and m.get("provider") != current.get("provider") and _model_available(m):
-            chain.append(m)
-            tried.add(m["id"])
-    for m in pool:
-        if m["id"] not in tried and _model_available(m):
-            chain.append(m)
-            tried.add(m["id"])
-    return chain
+    available = [m for m in pool if _model_available(m)]
+    available.sort(key=lambda m: (
+        m.get("provider") == "local",
+        bool(m.get("reasoning")) or any(
+            marker in str(m.get("id", "")).lower()
+            for marker in ("qwq", "reasoning", "deepseek-r1", "magistral")
+        ),
+    ))
+    local_reserve = [m for m in available if m.get("provider") == "local"]
+    available = [m for m in available if m.get("provider") != "local"]
+    provider_order = []
+    by_provider = {}
+    for model in available:
+        provider = model.get("provider", "groq")
+        key = (provider, model["id"])
+        if key in tried:
+            continue
+        tried.add(key)
+        if provider not in by_provider:
+            provider_order.append(provider)
+            by_provider[provider] = []
+        by_provider[provider].append(model)
+
+    # Round-robin providers before trying a second model from any one bucket.
+    # This prevents an exhausted provider with many models from monopolizing a
+    # request while still allowing every curated model to be reached eventually.
+    chain = []
+    while any(by_provider.values()):
+        for provider in provider_order:
+            models = by_provider[provider]
+            if models:
+                chain.append(models.pop(0))
+    return chain + local_reserve
 
 
 def _local_fallback_reply(message):
@@ -2936,12 +2987,12 @@ IMAGE_GENERATION_RE = re.compile(
 
 TOOL_CALL_JSON_REFUSAL_EN = (
     "I can't execute hidden tool-call JSON in the chat UI. "
-    "If you want an image, ask for it normally and I'll use the available image-generation endpoint when quota is available."
+    "Image generation is disabled in this free-only AI Assistant."
 )
 
 TOOL_CALL_JSON_REFUSAL_RU = (
     "Я не должен показывать или исполнять скрытый JSON tool-call в чате. "
-    "Если нужна картинка, попроси обычным текстом: я использую доступный endpoint генерации, когда квота доступна."
+    "Генерация изображений отключена в этом бесплатном AI Assistant."
 )
 
 
@@ -2954,113 +3005,9 @@ def _is_image_generation_request(message):
 
 
 def _image_generation_unavailable_reply(message, err):
-    code = _err_code(err) or "image_generation_unavailable"
     if _looks_russian(message):
-        if code in {"too_many_requests", "quota_exhausted"} or "quota" in str(code):
-            return "Генерация картинок через Gemini подключена, но текущая API-квота исчерпана. Попробуй позже."
-        if code == "missing_gemini_key":
-            return "Генерация картинок через Gemini сейчас не настроена: нет GEMINI_API_KEY на сервере."
-        return "Генерация картинок через Gemini сейчас недоступна. Попробуй позже."
-    if code in {"too_many_requests", "quota_exhausted"} or "quota" in str(code):
-        return "Gemini image generation is connected, but the current API quota is exhausted. Please try again later."
-    if code == "missing_gemini_key":
-        return "Gemini image generation is not configured on the server yet."
-    return "Gemini image generation is temporarily unavailable. Please try again later."
-
-
-def _attachment_image_part(attachment):
-    data_url = attachment.get("data_url") if isinstance(attachment, dict) else ""
-    if not isinstance(data_url, str) or not data_url.startswith("data:image/") or "," not in data_url:
-        return None
-    header, b64 = data_url.split(",", 1)
-    mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "image/jpeg"
-    return {"type": "image", "mime_type": mime, "data": b64}
-
-
-def _extract_generated_image(data):
-    candidates = []
-    if isinstance(data, dict):
-        for key in ("output_image", "outputImage"):
-            if isinstance(data.get(key), dict):
-                candidates.append(data[key])
-        for step in data.get("steps", []) if isinstance(data.get("steps"), list) else []:
-            if not isinstance(step, dict):
-                continue
-            for field in ("content", "summary", "output"):
-                blocks = step.get(field)
-                if isinstance(blocks, list):
-                    candidates.extend(block for block in blocks if isinstance(block, dict))
-                elif isinstance(blocks, dict):
-                    candidates.append(blocks)
-    for item in candidates:
-        if item.get("data") and str(item.get("type", "image")).lower() == "image":
-            mime = item.get("mime_type") or item.get("mimeType") or "image/jpeg"
-            return {"mime_type": mime, "data": item.get("data")}
-        if item.get("data") and (item.get("mime_type") or item.get("mimeType")):
-            mime = item.get("mime_type") or item.get("mimeType")
-            if str(mime).startswith("image/"):
-                return {"mime_type": mime, "data": item.get("data")}
-    return None
-
-
-def _call_gemini_image(message, attachments):
-    api_key = _provider_api_key("gemini")
-    if not api_key:
-        return None, {"code": "missing_gemini_key"}
-    prompt = (message or "").strip()[:4000]
-    inputs = [{"type": "text", "text": prompt}]
-    for attachment in attachments or []:
-        if attachment.get("kind") == "image":
-            part = _attachment_image_part(attachment)
-            if part:
-                inputs.append(part)
-    payload = {
-        "model": GEMINI_IMAGE_MODEL,
-        "input": inputs,
-        "response_format": {
-            "type": "image",
-            "mime_type": "image/jpeg",
-            "aspect_ratio": "1:1",
-        },
-    }
-    req = Request(
-        GEMINI_INTERACTIONS_API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        method="POST",
-    )
-    try:
-        with urlopen(req, timeout=90) as resp:
-            raw = resp.read().decode("utf-8")
-        data = json.loads(raw)
-        if data.get("error"):
-            err = data["error"]
-            return None, {"code": err.get("code") or err.get("status") or "image_error", "body": err.get("message", "")[:500]}
-        image = _extract_generated_image(data)
-        if not image:
-            return None, {"code": "no_image_output", "body": raw[:500]}
-        mime = image.get("mime_type") or "image/jpeg"
-        b64 = str(image.get("data") or "")
-        return {
-            "mime_type": mime,
-            "data_url": f"data:{mime};base64,{b64}",
-            "alt": prompt[:160] or "Generated image",
-        }, None
-    except HTTPError as e:
-        body = ""
-        code = f"http_{e.code}"
-        try:
-            body = e.read().decode("utf-8")[:1000]
-            parsed = json.loads(body)
-            err = parsed.get("error") or {}
-            code = err.get("code") or err.get("status") or code
-        except Exception:
-            pass
-        return None, {"code": code, "status": e.code, "body": body}
-    except (URLError, TimeoutError) as e:
-        return None, {"code": "timeout", "body": str(e)[:300]}
-    except Exception as e:
-        return None, {"code": "unknown", "body": str(e)[:300]}
+        return "Генерация изображений отключена в бесплатном AI Assistant. Текстовый и голосовой чат продолжают работать через free-only пул."
+    return "Image generation is disabled in this free-only AI Assistant. Text and voice chat remain available through the free-only pool."
 
 
 def _plain_tool_call_reply(message):
@@ -3125,13 +3072,36 @@ class Handler(SimpleHTTPRequestHandler):
                 return part.split("=", 1)[1].strip()
         return None
 
-    def _json(self, status, payload, new_session=None):
+    def _cookie_flags(self, max_age):
+        """Shared cookie attributes: HttpOnly + SameSite + Secure on non-local."""
+        host = (self.headers.get("Host", "") or "").split(":", 1)[0].lower()
+        is_local = host in {"127.0.0.1", "localhost", "::1"}
+        parts = [f"Path=/", f"Max-Age={int(max_age)}", "SameSite=Lax", "HttpOnly"]
+        if not is_local:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def _chat_session_cookie(self, session_id, max_age=86400):
+        return f"ap_chat_sid={session_id}; {self._cookie_flags(max_age)}"
+
+    def _auth_session_cookie(self, token, max_age=604800):
+        # 7-day auth session, HttpOnly so XSS cannot steal the token via JS.
+        return f"ap_auth={token}; {self._cookie_flags(max_age)}"
+
+    def _clear_auth_cookie(self):
+        return f"ap_auth=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly; Secure"
+
+    def _json(self, status, payload, new_session=None, extra_cookies=None):
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self._cors()
         if new_session:
-            self.send_header("Set-Cookie", f"ap_chat_sid={new_session}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly")
+            self.send_header("Set-Cookie", self._chat_session_cookie(new_session))
+        if extra_cookies:
+            for cookie in extra_cookies:
+                if cookie:
+                    self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -3152,9 +3122,24 @@ class Handler(SimpleHTTPRequestHandler):
         forwarded = self.headers.get("X-Forwarded-For", "")
         return forwarded.split(",")[0].strip() if forwarded else self.client_address[0]
 
+    def _has_qa_rate_limit_bypass(self):
+        expected = os.environ.get("QA_BYPASS_TOKEN", "").strip()
+        provided = self.headers.get("X-QA-Token", "").strip()
+        return bool(expected and provided and secrets.compare_digest(provided, expected))
+
     def _get_token(self):
+        # Prefer Authorization for API clients; fall back to HttpOnly cookie.
         auth = self.headers.get("Authorization", "")
-        return auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
+        if auth.startswith("Bearer "):
+            token = auth[7:].strip()
+            if token:
+                return token
+        cookie_header = self.headers.get("Cookie", "")
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith("ap_auth="):
+                return part.split("=", 1)[1].strip()
+        return ""
 
     def _get_admin_user(self):
         user = _get_user_by_token(self._get_token())
@@ -3211,17 +3196,26 @@ class Handler(SimpleHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if path == "/api/health":
-            self._json(200, {
-                "status": "ok",
-                "service": "alexpavsky-chat-server",
-                "port": int(os.environ.get("CHAT_PORT", "8000")),
-                "database": "postgresql" if _pg_enabled() else "sqlite",
-                "sqlite_backup": bool(_pg_enabled()),
-                "providers": {
-                    p: bool(_provider_api_key(p))
-                    for p in ("groq", "openrouter", "gemini", "huggingface", "cerebras", "sambanova", "mistral")
-                },
-            })
+            # Public health is intentionally minimal (no provider/DB fingerprinting).
+            # Detailed status is available to authenticated admins only.
+            if self._get_admin_user():
+                self._json(200, {
+                    "status": "ok",
+                    "service": "alexpavsky-chat-server",
+                    "port": int(os.environ.get("CHAT_PORT", "8000")),
+                    "database": "postgresql" if _pg_enabled() else "sqlite",
+                    "sqlite_backup": bool(_pg_enabled()),
+                    "providers": {
+                        p: bool(_provider_api_key(p))
+                        for p in (
+                            "groq", "openrouter", "huggingface", "mistral",
+                            "nvidia", "cohere", "cloudflare", "github",
+                            "cerebras", "sambanova",
+                        )
+                    },
+                })
+            else:
+                self._json(200, {"status": "ok"})
             return
 
         if qs.get("access_key", [None])[0] == MAINTENANCE_KEY:
@@ -3666,6 +3660,33 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _lf_trace(self, body, session_id, ip_hash, message, attachments):
+        if langfuse_tracer is None:
+            return None
+        try:
+            client_sid = body.get("session_id") or body.get("sessionId") or body.get("conversation_id")
+            return langfuse_tracer.ChatTrace(
+                session_id=str(client_sid or session_id),
+                user_input=message or "[attachment]",
+                metadata={"ip_hash": ip_hash, "attachments": len(attachments or []), "history_turns": len(body.get("history") or [])},
+            )
+        except Exception:
+            return None
+
+    def _lf_generation(self, trace, model, start, user_content, reply, err):
+        if trace is None:
+            return
+        trace.generation(
+            "general",
+            start,
+            model=str(model.get("id")),
+            provider=str(model.get("provider", "")),
+            input=user_content if isinstance(user_content, str) else "[multimodal content]",
+            output=reply,
+            usage=getattr(_LAST_LLM_CALL, "usage", None),
+            error=None if (reply and reply.strip()) else err,
+        )
+
     def do_POST(self):
         if self.path == "/api/maintenance-login":
             try:
@@ -3777,6 +3798,9 @@ class Handler(SimpleHTTPRequestHandler):
             session_id = uuid.uuid4().hex
             new_session = session_id
         ip_hash = _hash_ip(self._client_ip())
+        if not self._has_qa_rate_limit_bypass() and not _check_auth_rate(ip_hash, "chat"):
+            self._json(429, {"error": "rate_limit", "message": "Too many chat requests. Try again later."})
+            return
 
         message = _clean(body.get("message"), 12000)
         attachments = _sanitize_attachments(body.get("attachments", []))
@@ -3790,42 +3814,66 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         _log_message(session_id, ip_hash, "user", message or "[attachment]")
+        lf = self._lf_trace(body, session_id, ip_hash, message, attachments)
 
+        # Trivial greetings/thanks: reply instantly and locally so a simple "hi"
+        # never waits on the model pool (kills the rare slow-model smalltalk route).
+        if message and not attachments:
+            smalltalk_reply = _local_fallback_reply(message)
+            if smalltalk_reply:
+                _log_message(session_id, ip_hash, "assistant", smalltalk_reply, model="smalltalk")
+                if lf:
+                    lf.finish(smalltalk_reply, route="smalltalk")
+                self._json(200, {"reply": smalltalk_reply})
+                return
+
+        t_route = time.time()
         model, tier, reason = _route(message, attachments)
         max_tok = _max_tokens(tier)
         user_content, warning = _build_content(message, attachments, model["id"])
+        if lf:
+            lf.span("supervisor_route", t_route, input=message,
+                    output={"model": model.get("label"), "tier": tier, "reason": reason})
 
         log.info("route: %s tier=%s reason=%s sid=%s", model["label"], tier, reason, session_id[:8])
 
+        t_guard = time.time()
         guardrail_message = _normalize_guardrail_text(message or "")
 
         if PROMPT_EXTRACTION_RE.search(guardrail_message):
             reply = PROMPT_EXTRACTION_REFUSAL
             _log_message(session_id, ip_hash, "assistant", reply, "guardrail")
+            if lf:
+                lf.span("safety_gate", t_guard, output={"blocked": True, "rule": "prompt_extraction"}, level="WARNING")
+                lf.finish(reply, route="guardrail", rule="prompt_extraction")
             self._json(200, {"reply": reply}, new_session)
             return
 
         if HARMFUL_REQUEST_RE.search(guardrail_message):
             reply = HARMFUL_REQUEST_REFUSAL
             _log_message(session_id, ip_hash, "assistant", reply, "guardrail")
+            if lf:
+                lf.span("safety_gate", t_guard, output={"blocked": True, "rule": "harmful_request"}, level="WARNING")
+                lf.finish(reply, route="guardrail", rule="harmful_request")
             self._json(200, {"reply": reply}, new_session)
             return
 
         if _is_image_generation_request(message):
-            image, image_err = _call_gemini_image(message, attachments)
-            if image:
-                reply = "Generated image:"
-                if _looks_russian(message):
-                    reply = "Готово, сгенерировал картинку:"
-                _log_message(session_id, ip_hash, "assistant", reply, GEMINI_IMAGE_MODEL)
-                self._json(200, {"reply": reply, "images": [image]}, new_session)
-                return
+            image_err = {"code": "paid_provider_disabled"}
             reply = _image_generation_unavailable_reply(message, image_err)
-            _log_message(session_id, ip_hash, "assistant", reply, f"{GEMINI_IMAGE_MODEL}:unavailable")
-            self._json(200, {"reply": reply, "image_error": _err_code(image_err)}, new_session)
+            _log_message(session_id, ip_hash, "assistant", reply, "image-generation:free-only")
+            if lf:
+                lf.span("safety_gate", t_guard, output={"blocked": True, "rule": "image_generation"})
+                lf.finish(reply, route="image_generation_disabled")
+            self._json(200, {"reply": reply, "image_error": "paid_provider_disabled"}, new_session)
             return
 
-        reply, err = _call_model(model, SYSTEM_PROMPT, user_content, max_tok, history)
+        if lf:
+            lf.span("safety_gate", t_guard, output={"blocked": False})
+
+        t_call = time.time()
+        reply, err = _call_model(model, _system_prompt(), user_content, max_tok, history)
+        self._lf_generation(lf, model, t_call, user_content, reply, err)
         if not reply or not reply.strip():
             _record_model_failure(model, err)
 
@@ -3838,7 +3886,9 @@ class Handler(SimpleHTTPRequestHandler):
                     continue
                 log.info("fallback: %s -> %s (%s)", model["label"], fallback["label"], fallback["provider"])
                 fallback_content, _ = _build_content(message, attachments, fallback["id"])
-                reply, err = _call_model(fallback, SYSTEM_PROMPT, fallback_content, max_tok, history)
+                t_call = time.time()
+                reply, err = _call_model(fallback, _system_prompt(), fallback_content, max_tok, history)
+                self._lf_generation(lf, fallback, t_call, fallback_content, reply, err)
                 if reply and reply.strip():
                     model = fallback
                     break
@@ -3849,12 +3899,22 @@ class Handler(SimpleHTTPRequestHandler):
             local_reply = _local_fallback_reply(message)
             if local_reply:
                 _log_message(session_id, ip_hash, "assistant", local_reply, "local_fallback")
+                if lf:
+                    lf.finish(local_reply, route="local_fallback", degraded=True)
                 self._json(200, {"reply": local_reply, "degraded": True}, new_session)
                 return
+            if lf:
+                lf.finish(None, route="no_response", error=str(_err_code(err) or "no_response"))
             self._json(502, {"error": _err_code(err) or "no_response", "reply": "Sorry, all AI models are temporarily unavailable. Please try again in a moment."}, new_session)
             return
 
-        reply = _sanitize_tool_call_reply(reply.strip(), message)
+        t_adapt = time.time()
+        raw_reply = reply.strip()
+        reply = _sanitize_tool_call_reply(raw_reply, message)
+        if lf:
+            lf.span("response_adapter", t_adapt, input=raw_reply, output=reply,
+                    metadata={"changed": reply != raw_reply})
+            lf.finish(reply, route="model", model=model.get("label"), tier=tier, reason=reason)
         _log_message(session_id, ip_hash, "assistant", reply, model["label"])
 
         result = {"reply": reply}
@@ -3958,7 +4018,7 @@ class Handler(SimpleHTTPRequestHandler):
             return None, None, "name_required"
         if not email or not Handler._AUTH_EMAIL_RE.match(email) or len(email) > 200:
             return None, None, "invalid_email"
-        if not isinstance(password, str) or len(password) < 6 or len(password) > 200:
+        if not isinstance(password, str) or len(password) < 10 or len(password) > 200:
             return None, None, "password_too_short"
         return name, email, password
 
@@ -4088,6 +4148,10 @@ class Handler(SimpleHTTPRequestHandler):
             return
         password = password_or_err
 
+        if _is_admin_email(email):
+            self._json(403, {"error": "email_reserved"})
+            return
+
         # Uniqueness check. We do not leak whether the email exists when
         # the lookup races a parallel insert — that race is harmless and
         # the unique constraint catches it deterministically.
@@ -4126,7 +4190,12 @@ class Handler(SimpleHTTPRequestHandler):
         token = self._issue_session(user_id)
         user = _get_user_by_token(token)
         log.info("auth.register: user=%s email=%s ip=%s", user_id, email, ip_hash[:8])
-        self._json(201, {"user": _public_user_payload(user), "token": token})
+        # Session lives in HttpOnly cookie; body keeps user only (no token for XSS theft).
+        self._json(
+            201,
+            {"user": _public_user_payload(user), "ok": True},
+            extra_cookies=[self._auth_session_cookie(token)],
+        )
 
     def _handle_login(self):
         try:
@@ -4161,7 +4230,11 @@ class Handler(SimpleHTTPRequestHandler):
         token = self._issue_session(row["id"])
         user = _get_user_by_token(token)
         log.info("auth.login: user=%s email=%s ip=%s", row["id"], email, ip_hash[:8])
-        self._json(200, {"user": _public_user_payload(user), "token": token})
+        self._json(
+            200,
+            {"user": _public_user_payload(user), "ok": True},
+            extra_cookies=[self._auth_session_cookie(token)],
+        )
 
     def _handle_logout(self):
         token = self._get_token()
@@ -4172,7 +4245,7 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.commit()
             finally:
                 conn.close()
-        self._json(200, {"ok": True})
+        self._json(200, {"ok": True}, extra_cookies=[self._clear_auth_cookie()])
 
     def _handle_challenge(self):
         try:
@@ -4537,7 +4610,7 @@ CRITICAL RULES:
         # Use a fast reliable model for generation to avoid Nginx 504 timeouts.
         # DeepSeek R1 or large OpenRouter models can take >60s to stream JSON.
         gen_model = None
-        for m_id in ["gemini-2.5-flash", "gemini-2.0-flash", "llama-3.3-70b-versatile"]:
+        for m_id in ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"]:
             if m_id in MODEL_BY_ID and _model_available(MODEL_BY_ID[m_id]):
                 gen_model = MODEL_BY_ID[m_id]
                 break
