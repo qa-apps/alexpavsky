@@ -35,9 +35,9 @@ except ImportError:  # Docker starts uvicorn from inside /app.
     from safety import safety_response
 
 try:
-    import PyPDF2
+    import pypdf
 except ImportError:
-    PyPDF2 = None  # type: ignore
+    pypdf = None  # type: ignore
 
 import tiktoken
 
@@ -160,9 +160,9 @@ def chunk_text(text: str) -> list[str]:
 
 
 def extract_pdf_text(data: bytes) -> str:
-    if PyPDF2 is None:
-        raise HTTPException(500, "PyPDF2 not installed")
-    reader = PyPDF2.PdfReader(io.BytesIO(data))
+    if pypdf is None:
+        raise HTTPException(500, "pypdf not installed")
+    reader = pypdf.PdfReader(io.BytesIO(data))
     pages = [page.extract_text() or "" for page in reader.pages]
     return "\n".join(pages)
 
@@ -461,12 +461,12 @@ async def rag_query(req: QueryRequest):
             must=[FieldCondition(key="document_id", match=MatchValue(value=req.document_id))]
         )
 
-    q_hits = qdrant_client.search(
+    q_hits = qdrant_client.query_points(
         collection_name=QDRANT_COLLECTION,
-        query_vector=query_vec,
+        query=query_vec,
         limit=RAG_TOP_K,
         query_filter=qdrant_filter,
-    )
+    ).points
     qdrant_results = [
         {"content": h.payload.get("content", ""), "score": h.score, "chunk_index": h.payload.get("chunk_index")}
         for h in q_hits

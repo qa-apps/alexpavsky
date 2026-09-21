@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps needed by psycopg2-binary and pypdf2
+# System deps needed by psycopg2-binary
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         libpq-dev \
