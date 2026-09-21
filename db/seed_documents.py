@@ -16,7 +16,9 @@ import json
 
 RAG_API = os.environ.get("RAG_API_URL", "http://localhost:8001").rstrip("/")
 
-DOC_DIR = "/Users/alexp/llm-wiki/raw"
+# The source documents are not kept in this repo. Point RAG_DOC_DIR at the
+# directory that holds them before running this script.
+DOC_DIR = os.environ.get("RAG_DOC_DIR", "").rstrip("/")
 DOCUMENTS = [
     f"{DOC_DIR}/01_Senior_QA_Automation_AI_Assisted_Testing_Handbook.docx",
     f"{DOC_DIR}/02_Playwright_TypeScript_Framework_Architecture.docx",
@@ -76,6 +78,12 @@ def main():
     if not check_health():
         print("\nERROR: Start Docker first: docker compose up -d")
         sys.exit(1)
+
+    if not DOC_DIR:
+        sys.exit(
+            "Set RAG_DOC_DIR to the directory holding the source .docx files, "
+            "e.g. RAG_DOC_DIR=~/llm-wiki/raw python3 db/seed_documents.py"
+        )
 
     print("  Embeddings: local sentence-transformers all-MiniLM-L6-v2")
 
