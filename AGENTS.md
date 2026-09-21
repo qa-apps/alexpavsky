@@ -1,3 +1,43 @@
+## Deployment — GitHub and the VPS move together
+
+**Every change to alexpavsky.com ships to both, in the same act. Never one without the other.**
+
+The live service is `/var/www/alexpavsky.com/html` on `alexpavsky-prod`. It is **not**
+a git checkout: `ops/deploy-backend.sh` rsyncs a working directory to it. So a deploy
+does not touch GitHub on its own, and GitHub does not reach the VPS on its own.
+
+That is exactly how this project broke. Edits were deployed straight to the server and
+never pushed, and the two drifted for months: 15 functions — the httpOnly cookie auth,
+the free-model pool and curator, Langfuse tracing — lived only in production, while the
+repository still carried a dead Gemini image path. The visible cost was a frontend that
+sent `Authorization: Bearer undefined` on every authenticated request from August until
+2026-09-21, because the repo had no record that the backend had stopped returning a
+token.
+
+### The order
+
+1. Commit the change.
+2. Push it to GitHub.
+3. `./ops/deploy-backend.sh`
+
+The script enforces this: it refuses to run when the working tree is dirty, when the
+branch has no upstream, or when `HEAD` differs from `origin/<branch>`. It is not a
+reminder — the deploy will not proceed.
+
+For a genuine emergency, `ALLOW_DIRTY_DEPLOY=1 ./ops/deploy-backend.sh` overrides it and
+says so loudly. **Push immediately afterwards**, or the drift starts again.
+
+### Also true
+
+- `ops/deploy-backend.sh` rsyncs with `--delete`. A file missing from this repository is
+  **deleted from the server**. Before deploying, make sure everything production needs is
+  committed here — `langfuse_tracer.py` and `ops/` were once missing and would have been
+  destroyed by a deploy from a clean clone.
+- Secrets are never committed. The script builds the remote env file from your local
+  `.env`, which is gitignored.
+- After deploying, verify against the public edge, not the server: `/`, `/api/health`,
+  and a real `POST /api/chat`.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
