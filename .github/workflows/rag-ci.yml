@@ -1,0 +1,39 @@
+name: RAG API CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rag/**"
+      - "tests/test_rag_safety.py"
+      - ".github/workflows/rag-ci.yml"
+  pull_request:
+    paths:
+      - "rag/**"
+      - "tests/test_rag_safety.py"
+      - ".github/workflows/rag-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-rag-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: rag/requirements.txt
+      - name: Install RAG dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r rag/requirements.txt
+      - name: Check dependency consistency
+        run: python -m pip check
+      - name: Verify runtime imports
+        run: python -c "import fastapi, httpx, pypdf, qdrant_client, sentence_transformers, tiktoken, torch"
+      - name: Run RAG safety tests
+        env:
+          PYTHONPATH: .
+        run: python -m pytest tests/test_rag_safety.py -q
