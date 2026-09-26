@@ -3,20 +3,25 @@ name: RAG API CI
 on:
   push:
     branches: [main]
-    paths:
-      - "rag/**"
-      - "tests/test_rag_safety.py"
-      - ".github/workflows/rag-ci.yml"
   pull_request:
-    paths:
-      - "rag/**"
-      - "tests/test_rag_safety.py"
-      - ".github/workflows/rag-ci.yml"
 
 permissions:
   contents: read
 
 jobs:
+  validate-article-reader:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:reader
+
   validate-rag-runtime:
     runs-on: ubuntu-latest
     timeout-minutes: 25

@@ -40,12 +40,13 @@
     }
     </script>
     <link rel="stylesheet" href="style.css?v=20260917-compact-footer">
+    <link rel="stylesheet" href="article-reader.css?v=20260926-reader">
 </head>
 <body>
 
     <!-- Article Modal -->
     <div class="article-modal-overlay" id="article-modal-overlay">
-        <div class="article-modal article-modal-card">
+        <div class="article-modal article-modal-card" role="dialog" aria-modal="true" aria-label="Article reader">
             <button class="article-modal-close" id="article-modal-close" aria-label="Close"><i class="fas fa-times"></i></button>
             <div class="article-modal-hero" id="article-modal-hero">
                 <div class="article-modal-hero-overlay"></div>
@@ -55,6 +56,7 @@
                     <div class="article-modal-meta" id="article-modal-meta"></div>
                 </div>
             </div>
+            <div class="reader-progress" aria-hidden="true"><span></span></div>
             <div class="article-modal-body">
                 <div class="article-modal-loading" id="article-modal-loading"><div class="article-modal-spinner"></div><span>Loading article…</span></div>
                 <div class="article-modal-reader" id="article-modal-reader"></div>
@@ -62,11 +64,13 @@
             </div>
             <div class="article-modal-actions">
                 <div class="article-modal-view-toggle" id="article-modal-view-toggle">
-                    <button class="article-modal-view-btn active" data-view="reader" type="button"><i class="fas fa-book-open"></i> Reader</button>
-                    <button class="article-modal-view-btn" data-view="full" type="button"><i class="fas fa-globe"></i> Full page</button>
+                    <button type="button" id="reader-theme" title="Switch reading theme" aria-label="Switch reading theme" aria-pressed="false"><i class="fas fa-moon" aria-hidden="true"></i></button>
+                    <button type="button" id="reader-smaller" title="Smaller text" aria-label="Smaller text"><i class="fas fa-minus" aria-hidden="true"></i></button>
+                    <span id="reader-size">Aa</span>
+                    <button type="button" id="reader-larger" title="Larger text" aria-label="Larger text"><i class="fas fa-plus" aria-hidden="true"></i></button>
                 </div>
-                <a class="article-modal-link article-modal-btn-primary" id="article-modal-link" href="#" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> Read full article</a>
-                <button class="article-modal-btn-copy" id="article-modal-copy" title="Copy link"><i class="fas fa-link"></i> Copy link</button>
+                <a class="article-modal-link article-modal-btn-primary" id="article-modal-link" href="#" target="_blank" rel="noopener noreferrer"><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i> <span>Open original</span></a>
+                <button class="article-modal-btn-copy" id="article-modal-copy" title="Copy link" aria-label="Copy link"><i class="fas fa-link" aria-hidden="true"></i> Copy link</button>
             </div>
         </div>
     </div>
@@ -1163,6 +1167,9 @@
     </script>
     <script src="/voice-api/widget.js?v=20260917-compact-footer" defer></script>
 
-    <script src="script.js?v=20260813-voice-restore"></script>
+    <script src="assets/vendor/Readability.js?v=0.6.0"></script>
+    <script src="assets/vendor/purify.min.js?v=3.4.16"></script>
+    <script src="article-reader.js?v=20260926-reader"></script>
+    <script src="script.js?v=20260926-reader"></script>
 </body>
 </html>
