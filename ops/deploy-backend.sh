@@ -14,7 +14,7 @@ REMOTE_NGINX_SOURCE="/home/deploy/alexpavsky.com.nginx.conf"
 #
 # So: refuse to deploy anything GitHub does not already have.
 # Override for a genuine emergency with ALLOW_DIRTY_DEPLOY=1, which is loud.
-if [ -d .git ] && [ "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]; then
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]; then
   if [ -n "$(git status --porcelain)" ]; then
     echo "DEPLOY BLOCKED: uncommitted changes in the working tree." >&2
     echo "Commit and push them first — the VPS must not run code GitHub lacks." >&2
@@ -42,6 +42,49 @@ if [ -d .git ] && [ "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]; then
 elif [ "${ALLOW_DIRTY_DEPLOY:-0}" = "1" ]; then
   echo "WARNING: ALLOW_DIRTY_DEPLOY=1 — deploying code that GitHub may not have." >&2
   echo "WARNING: push it immediately afterwards, or the repo drifts again." >&2
+fi
+
+# Static reader releases must not sync/delete unrelated files or rewrite secrets.
+if [ "${1:-}" = "--reader-only" ]; then
+  release="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
+  stage="/home/deploy/alexpavsky-reader-stage/$release"
+  backup="/var/backups/alexpavsky-reader/$release"
+  files=(article-reader.css article-reader.js assets/vendor/Readability.js
+    assets/vendor/purify.min.js assets/vendor/Readability-LICENSE.md
+    assets/vendor/DOMPurify-LICENSE assets/vendor/README.md script.js index.html)
+  ssh "$VPS" "mkdir -p '$stage'; sudo mkdir -p '$backup'; sudo chown deploy:deploy '$backup'"
+  rsync -rlptzR --no-owner --no-group "${files[@]}" "$VPS:$stage/"
+  ssh "$VPS" python3 - "$stage" "$REMOTE_DIR" "$backup" "${files[@]}" <<'PY'
+import hashlib
+import os
+import pathlib
+import shutil
+import sys
+
+stage, target, backup = map(pathlib.Path, sys.argv[1:4])
+files = sys.argv[4:]
+for name in files:
+    if not (stage / name).is_file():
+        raise RuntimeError(f"Staged file missing: {name}")
+    current = target / name
+    if current.is_file():
+        saved = backup / name
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(current, saved)
+for name in files:
+    current = target / name
+    current.parent.mkdir(parents=True, exist_ok=True)
+    pending = current.with_name(current.name + '.reader-pending')
+    shutil.copyfile(stage / name, pending)
+    os.chmod(pending, 0o644)
+    os.replace(pending, current)
+    expected = hashlib.sha256((stage / name).read_bytes()).hexdigest()
+    assert hashlib.sha256(current.read_bytes()).hexdigest() == expected
+    print(expected, name)
+print('Backup:', backup)
+PY
+  echo "Reader deployed. Backend, environment, nginx, and all other files unchanged."
+  exit 0
 fi
 
 if [ -f .env ]; then

@@ -997,9 +997,13 @@
     }
 
     // ─── Article Modal (loads content via proxy) ───
+    var activeArticleRequest = 0;
+    var articleFetchController = null;
     function openArticleModal(url, source, title, desc, category, date) {
         var overlay = document.getElementById('article-modal-overlay');
         if (!overlay) return;
+        var articleRequest = ++activeArticleRequest;
+        if (articleFetchController) articleFetchController.abort();
         var sourceEl = document.getElementById('article-modal-source');
         var titleEl = document.getElementById('article-modal-title');
         var descEl = document.getElementById('article-modal-desc');
@@ -1025,7 +1029,6 @@
         var iframeEl = document.getElementById('article-modal-iframe');
         var readerEl = document.getElementById('article-modal-reader');
         var loadingEl = document.getElementById('article-modal-loading');
-        var viewToggle = document.getElementById('article-modal-view-toggle');
         var iframeLoadTimer = null;
         var iframeRequestId = 0;
         function fallbackIframeDoc(reason) {
@@ -1073,12 +1076,16 @@
                 var parsed = new DOMParser().parseFromString(html, 'text/html');
                 return parsed.body ? parsed.body.innerHTML : html;
             }
-            function showDoc(html) {
-                if (requestId !== iframeRequestId || completed) return;
+            function showDoc(html, metadata) {
+                if (articleRequest !== activeArticleRequest || requestId !== iframeRequestId || completed) return;
+                var formatted = window.ArticleReader.render(html, {
+                    url: displayUrl, source: source, title: title, date: date,
+                    image: metadata && metadata.image
+                });
                 completed = true;
                 if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
                 if (readerEl) {
-                    readerEl.innerHTML = htmlToArticleBody(html);
+                    readerEl.innerHTML = formatted;
                     readerEl.querySelectorAll('img').forEach(function (img) {
                         function showOrRemove() {
                             if (!img.isConnected) return;
@@ -1105,12 +1112,12 @@
                 if (loadingEl) loadingEl.style.display = 'none';
             }
             function showFallback(reason) {
-                if (requestId !== iframeRequestId || completed) return;
+                if (articleRequest !== activeArticleRequest || requestId !== iframeRequestId || completed) return;
                 completed = true;
                 if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
                 var fallbackDoc = fallbackIframeDoc(reason || 'Full reader preview is unavailable for this publisher. Showing the RSS preview.');
                 if (readerEl) {
-                    readerEl.innerHTML = htmlToArticleBody(fallbackDoc);
+                    readerEl.innerHTML = '<div class="reader-fallback">' + htmlToArticleBody(fallbackDoc) + '</div>';
                     readerEl.classList.add('loaded');
                 } else if (iframeEl) {
                     iframeEl.srcdoc = fallbackDoc;
@@ -1119,32 +1126,34 @@
                 if (loadingEl) loadingEl.style.display = 'none';
             }
             var controller = window.AbortController ? new AbortController() : null;
+            articleFetchController = controller;
             iframeLoadTimer = setTimeout(function () {
                 if (controller) controller.abort();
                 showFallback('Full reader preview took too long. Showing the RSS preview.');
             }, 9000);
             if (iframeEl) iframeEl.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
-            var requestUrl;
-            if (view === 'full') {
-                requestUrl = apiUrl('/api/article-embed?url=' + encodeURIComponent(fetchUrl));
-            } else {
-                var theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
-                requestUrl = apiUrl('/api/article-page?url=' + encodeURIComponent(fetchUrl) + '&theme=' + theme);
-            }
-            fetch(requestUrl, controller ? { signal: controller.signal } : {})
+            var theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
+            var requestUrl = apiUrl('/api/article-page?url=' + encodeURIComponent(fetchUrl) + '&theme=' + theme);
+            var requestOptions = controller ? { signal: controller.signal } : {};
+            var metadataRequest = fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(fetchUrl)), requestOptions)
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; });
+            var pageRequest = fetch(requestUrl, requestOptions)
                 .then(function (response) {
                     if (!response.ok) throw new Error('HTTP ' + response.status);
                     return response.text();
-                })
-                .then(function (html) {
+                });
+            Promise.all([pageRequest, metadataRequest])
+                .then(function (results) {
+                    var html = results[0];
                     if (!html || html.trim().length < 80) throw new Error('empty article preview');
                     if (/Article preview unavailable|We couldn't fetch this article/i.test(html)) {
                         throw new Error('source blocked article preview');
                     }
-                    showDoc(html);
+                    showDoc(html, results[1]);
                 })
                 .catch(function (err) {
-                    if (completed) return;
+                    if (articleRequest !== activeArticleRequest || completed) return;
                     var msg = (err && err.message) || '';
                     var message = 'Full reader preview is unavailable for this publisher. Showing the RSS preview.';
                     if (err && err.name === 'AbortError') {
@@ -1161,28 +1170,7 @@
                     showFallback(message);
                 });
         }
-        // Default to Reader so sources that block cross-origin embeds still show content.
-        if (viewToggle) {
-            var btns = viewToggle.querySelectorAll('.article-modal-view-btn');
-            btns.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === 'reader'); });
-            btns.forEach(function (b) {
-                b.onclick = function () {
-                    btns.forEach(function (x) { x.classList.remove('active'); });
-                    b.classList.add('active');
-                    loadIframeView(b.getAttribute('data-view'));
-                };
-            });
-        }
         loadIframeView('reader');
-        // Also fetch OG image for hero background
-        fetch(apiUrl('/api/article-proxy?url=' + encodeURIComponent(fetchUrl)))
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (data) {
-                if (data && data.image && heroEl) {
-                    heroEl.style.backgroundImage = 'url(' + data.image + ')';
-                }
-            })
-            .catch(function () {});
         if (metaEl) {
             var parts = [];
             if (category) parts.push('<span class="article-modal-cat">' + getCategoryLabel(category) + '</span>');
@@ -1195,6 +1183,8 @@
                 navigator.clipboard.writeText(displayUrl).then(function () {
                     copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
                     setTimeout(function () { copyBtn.innerHTML = '<i class="fas fa-link"></i> Copy link'; }, 2000);
+                }).catch(function () {
+                    copyBtn.title = 'Copy unavailable. Use Open original to get the link.';
                 });
             };
         }
@@ -1204,6 +1194,8 @@
     function closeArticleModal() {
         var overlay = document.getElementById('article-modal-overlay');
         if (!overlay) return;
+        activeArticleRequest += 1;
+        if (articleFetchController) articleFetchController.abort();
         overlay.classList.remove('active');
         document.body.style.overflow = '';
     }
