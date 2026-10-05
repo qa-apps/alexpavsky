@@ -130,3 +130,24 @@ class SpecialistTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenerationPathTests(unittest.TestCase):
+    """Run the real specialist generation code with only the network stubbed.
+
+    The routing tests mock whole agents, so a NameError inside a generation
+    path (the merge renamed SYSTEM_PROMPT) shipped green. These go through it.
+    """
+
+    def _fake_model(self, model, system, user_content, max_tok=1024, history=None):
+        self.seen_system = system
+        return "stub answer", None
+
+    def test_general_agent_builds_prompt_and_answers(self):
+        model = {"id": "stub:free", "label": "Stub", "provider": "openrouter", "free": True, "tier": "M"}
+        with patch.object(chat, "_call_model", side_effect=self._fake_model), \
+                patch.object(chat, "_route", return_value=(model, "M", "general")):
+            for channel in ("chat", "voice"):
+                answer = chat._call_agent_general("Explain Python decorators", channel, [], "")[0]
+                self.assertEqual(answer, "stub answer")
+                self.assertIn(chat.SYSTEM_PROMPT_BASE, self.seen_system)

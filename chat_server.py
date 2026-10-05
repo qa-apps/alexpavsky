@@ -3593,7 +3593,7 @@ KNOWLEDGE_BASE_DOWN_NOTE = (
 
 
 def _call_agent_general(message, channel, history, user_note, guard_note=""):
-    system = SYSTEM_PROMPT + (VOICE_BREVITY if channel == "voice" else "") + user_note + guard_note
+    system = _system_prompt() + (VOICE_BREVITY if channel == "voice" else "") + user_note + guard_note
     deadline = _agent_deadline(channel)
     model, tier, reason = _route(message, [])
     max_tok = min(_max_tokens(tier), 220 if channel == "voice" else _max_tokens(tier))
