@@ -151,3 +151,37 @@ class GenerationPathTests(unittest.TestCase):
                 answer = chat._call_agent_general("Explain Python decorators", channel, [], "")[0]
                 self.assertEqual(answer, "stub answer")
                 self.assertIn(chat.SYSTEM_PROMPT_BASE, self.seen_system)
+
+
+class PrivacyTests(unittest.TestCase):
+    def test_local_machine_paths_are_scrubbed(self):
+        scrub = chat._scrub_local_paths
+        self.assertEqual(scrub("see /Users/alexp/Projects/alexpavsky/chat_server.py"), "see alexpavsky/chat_server.py")
+        self.assertEqual(scrub("`/Users/alexp/Projects/PW_alexpavsky` repo"), "`PW_alexpavsky` repo")
+        self.assertEqual(scrub("/private/tmp/../Users/bob/notes.md"), "/private/tmp/..~/notes.md")
+        self.assertEqual(scrub("/home/deploy/LocalApps/job-app/run.py"), "job-app/run.py")
+        self.assertEqual(scrub("log at /Users/alexp/report.json"), "log at ~/report.json")
+        for keep in ("run /usr/bin/python3", "GET /api/rag/query", "no paths here", ""):
+            self.assertEqual(scrub(keep), keep)
+
+    def test_rag_agent_output_is_scrubbed(self):
+        leaky = "Alex built /Users/alexp/Projects/alexpavsky and /Users/alexp/Projects/PW_alexpavsky."
+        payload = {"answer": "", "contexts": [leaky], "retrieve_only": True,
+                   "sources": [{"content": leaky, "filename": "a.md", "score": 0.9}]}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(payload).encode()
+
+        with patch.object(chat, "urlopen", return_value=FakeResponse()), \
+                patch.object(chat, "_rag_generate_from_contexts", return_value=leaky):
+            answer, sources, _ = chat._call_agent_rag("What projects has Alex built?", "chat")
+        self.assertIn("alexpavsky", answer)
+        self.assertNotIn("/Users/", answer)
+        self.assertTrue(sources and all("/Users/" not in (src.get("content") or "") for src in sources))

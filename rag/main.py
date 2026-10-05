@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import os
+import re
 import textwrap
 import time
 import urllib.request
@@ -612,6 +613,22 @@ class QueryRequest(BaseModel):
     retrieve_only: bool = False
 
 
+# Knowledge-base notes quote local machine paths (/Users/<name>/Projects/...).
+# Strip the machine part before text reaches an LLM, the public site or the
+# voice agent: keep the repo-relative path (the repos are public), drop the
+# user name and home layout.
+_LOCAL_PATH_PREFIX_RE = re.compile(
+    r"(?:/private)?/(?:Users|home)/[^/\s`'\"]+/(?:Projects|LocalApps|Desktop|Documents|Downloads|llm-wiki)/"
+)
+_LOCAL_HOME_RE = re.compile(r"(?:/private)?/(?:Users|home)/[^/\s`'\"]+")
+
+
+def _scrub_local_paths(text):
+    if not isinstance(text, str) or not text:
+        return text
+    return _LOCAL_HOME_RE.sub("~", _LOCAL_PATH_PREFIX_RE.sub("", text))
+
+
 @app.post("/api/rag/query")
 async def rag_query(req: QueryRequest):
     """
@@ -692,6 +709,7 @@ async def rag_query(req: QueryRequest):
 
     # Build context from pgvector results (primary), fall back to qdrant
     context_chunks = [r["content"] for r in pg_results] or [r["content"] for r in qdrant_results]
+    context_chunks = [_scrub_local_paths(c) for c in context_chunks]
 
     if not context_chunks:
         raise HTTPException(404, "No relevant documents found. Upload documents first.")
@@ -705,7 +723,7 @@ async def rag_query(req: QueryRequest):
     source_rows = pg_results or qdrant_results
     sources = [
         {
-            "content": r["content"][:300],
+            "content": _scrub_local_paths(r["content"])[:300],
             "score": float(r["score"]),
             "filename": r.get("filename"),
         }
@@ -778,7 +796,7 @@ async def rag_query(req: QueryRequest):
         conn.close()
 
     return {
-        "answer": answer,
+        "answer": _scrub_local_paths(answer),
         "sources": sources,
         # Full retrieved chunk text — what the LLM actually saw. Consumers that
         # need to verify groundedness (Ragas faithfulness, manual audit) should

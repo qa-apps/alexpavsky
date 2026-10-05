@@ -3444,6 +3444,27 @@ def _rag_generate_from_contexts(message, contexts, channel, history=None):
     return reply or _rag_extractive_fallback(message, contexts, channel, history)
 
 
+# Knowledge-base notes quote local machine paths (/Users/<name>/Projects/...).
+# Strip the machine part before text reaches an LLM, the public site or the
+# voice agent: keep the repo-relative path (the repos are public), drop the
+# user name and home layout.
+_LOCAL_PATH_PREFIX_RE = re.compile(
+    r"(?:/private)?/(?:Users|home)/[^/\s`'\"]+/(?:Projects|LocalApps|Desktop|Documents|Downloads|llm-wiki)/"
+)
+_LOCAL_HOME_RE = re.compile(r"(?:/private)?/(?:Users|home)/[^/\s`'\"]+")
+
+
+def _scrub_local_paths(text):
+    if not isinstance(text, str) or not text:
+        return text
+    return _LOCAL_HOME_RE.sub("~", _LOCAL_PATH_PREFIX_RE.sub("", text))
+
+
+def _scrub_sources(sources):
+    return [{k: _scrub_local_paths(v) for k, v in src.items()} if isinstance(src, dict) else src
+            for src in (sources or [])]
+
+
 def _call_agent_rag(message, channel, history=None):
     payload = {
         "query": message,
@@ -3475,11 +3496,11 @@ def _call_agent_rag(message, channel, history=None):
         contexts = [chunk for chunk in (data.get("contexts") or []) if isinstance(chunk, str) and chunk.strip()]
         if not contexts:
             if answer and not RAG_SERVICE_FAILURE_RE.search(answer):
-                return answer, sources, data
+                return _scrub_local_paths(answer), _scrub_sources(sources), data
             raise RuntimeError("rag_answer_unavailable")
         answer = _rag_generate_from_contexts(message, contexts, channel, history)
         data["regenerated_locally"] = True
-    return answer, sources, data
+    return _scrub_local_paths(answer), _scrub_sources(sources), data
 
 
 NEWS_STOPWORDS = {
