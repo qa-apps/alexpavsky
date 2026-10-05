@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import textwrap
+import threading
 import time
 import urllib.request
 import uuid
@@ -81,9 +82,16 @@ log = logging.getLogger("rag-api")
 # pre-seeded into a persistent cache by deployment; never contact Hugging Face
 # on the request path, where an expired token used to break every RAG query.
 _st_model = None
+_st_model_lock = threading.Lock()
+
+
 def get_st_model():
     global _st_model
-    if _st_model is None:
+    if _st_model is not None:
+        return _st_model
+    with _st_model_lock:  # endpoints run in a threadpool; load the model once
+        if _st_model is not None:
+            return _st_model
         from sentence_transformers import SentenceTransformer
         log.info("Loading sentence-transformers model (local cache first)...")
         try:
@@ -629,8 +637,13 @@ def _scrub_local_paths(text):
     return _LOCAL_HOME_RE.sub("~", _LOCAL_PATH_PREFIX_RE.sub("", text))
 
 
+# Endpoints below are plain `def` on purpose: they call blocking code (psycopg2,
+# Qdrant, sentence-transformers, LLM HTTP). As `async def` they ran on the single
+# event loop, so one slow generation froze every request — including the
+# millisecond retrieve_only calls the chat RAG Agent and the voice agent depend on.
+# FastAPI runs `def` endpoints in a threadpool. Upload stays async (awaits the file).
 @app.post("/api/rag/query")
-async def rag_query(req: QueryRequest):
+def rag_query(req: QueryRequest):
     """
     Semantic search over stored chunks, then generate an answer via LLM.
     Returns answer, sources, Ragas metrics, and both pgvector / Qdrant results.
@@ -824,7 +837,7 @@ class EvalRequest(BaseModel):
 
 
 @app.post("/api/eval/run")
-async def eval_run(req: EvalRequest):
+def eval_run(req: EvalRequest):
     """
     Run a single LLM evaluation.
     Metrics: exact_match, contains, llm_judge (LLM scores 0-1).
@@ -903,7 +916,7 @@ async def eval_run(req: EvalRequest):
 # GET /api/eval/results
 # ---------------------------------------------------------------------------
 @app.get("/api/eval/results")
-async def eval_results(limit: int = 20, offset: int = 0):
+def eval_results(limit: int = 20, offset: int = 0):
     limit = min(limit, 100)
     conn = get_pg()
     try:
@@ -934,7 +947,7 @@ async def eval_results(limit: int = 20, offset: int = 0):
 # GET /api/rag/metrics
 # ---------------------------------------------------------------------------
 @app.get("/api/rag/metrics")
-async def rag_metrics():
+def rag_metrics():
     conn = get_pg()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -978,7 +991,7 @@ async def rag_metrics():
 # GET /api/health
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
-async def health():
+def health():
     pg_status = "connected"
     qdrant_status = "connected"
     ts = datetime.now(tz=timezone.utc).isoformat()
