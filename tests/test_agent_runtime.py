@@ -209,3 +209,18 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(route("Какие проекты сделал Алекс?"), ["rag"])
         self.assertEqual(route("Расскажи про опыт Павловского в QA"), ["rag"])
         self.assertEqual(route("Что нового в мире AI?"), ["news"])
+
+    def test_news_ranker_prefers_fresh_items_for_recency_questions(self):
+        now = chat.datetime.now(chat.timezone.utc)
+        iso = lambda days: (now - chat.timedelta(days=days)).isoformat()
+        articles = [  # newest first, like the feed cache
+            {"title": "EdgeMate: a local AI coding interviewer", "source": "Dev.to", "category": "dev", "date": iso(0.2)},
+            {"title": "The latest AI news we announced", "source": "Google AI Blog", "category": "ai", "date": iso(3)},
+            {"title": "New AI experts join the team", "source": "Google AI Blog", "category": "ai", "date": iso(17)},
+        ]
+        titles = [a["title"] for a in chat._news_rank_articles("What is new in AI today?", articles, limit=2)]
+        self.assertIn("EdgeMate: a local AI coding interviewer", titles)
+        self.assertNotIn("New AI experts join the team", titles)
+        # Without recency intent the source-category preference is unchanged.
+        top = chat._news_rank_articles("Google AI research", articles, limit=1)[0]
+        self.assertEqual(top["source"], "Google AI Blog")
