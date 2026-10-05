@@ -634,11 +634,10 @@ RSS_SOURCES = [
     {"name": "Hugging Face", "url": "https://huggingface.co/blog/feed.xml", "category": "ai"},
     {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/", "category": "ai"},
     {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "category": "ai"},
-    {"name": "Anthropic", "url": "https://www.anthropic.com/rss.xml", "category": "ai"},
     {"name": "DeepMind", "url": "https://deepmind.google/blog/rss.xml", "category": "ai"},
-    {"name": "LangChain Blog", "url": "https://blog.langchain.dev/rss/", "category": "ai"},
+    {"name": "LangChain Blog", "url": "https://www.langchain.com/blog/rss.xml", "category": "ai"},
     {"name": "Towards AI", "url": "https://pub.towardsai.net/feed", "category": "ai"},
-    {"name": "MIT AI News", "url": "https://news.mit.edu/topic/artificial-intelligence2/feed", "category": "ai"},
+    {"name": "MIT AI News", "url": "https://news.mit.edu/rss/topic/artificial-intelligence2", "category": "ai"},
     # QA & Testing
     {"name": "Software Testing Help", "url": "https://www.softwaretestinghelp.com/feed/", "category": "qa"},
     {"name": "Cypress Blog", "url": "https://www.cypress.io/blog/rss.xml", "category": "qa"},
@@ -646,7 +645,6 @@ RSS_SOURCES = [
     {"name": "Testomat Blog", "url": "https://testomat.io/blog/feed/", "category": "qa"},
     {"name": "MuukTest Blog", "url": "https://muuktest.com/blog/rss.xml", "category": "qa"},
     {"name": "Mabl Blog", "url": "https://www.mabl.com/blog/rss.xml", "category": "qa"},
-    {"name": "Playwright Blog", "url": "https://playwright.dev/blog/rss.xml", "category": "qa"},
     # Dev & Engineering
     {"name": "Martin Fowler", "url": "https://martinfowler.com/feed.atom", "category": "dev"},
     {"name": "CSS-Tricks", "url": "https://css-tricks.com/feed/", "category": "dev"},
@@ -3561,6 +3559,40 @@ def _news_categories(message):
     return {name for name, pattern in NEWS_CATEGORY_HINTS.items() if pattern.search(message or "")}
 
 
+# Recency intent ("what's new today", "latest", "свежие новости"): a fresh article on
+# the topic must beat an older one that only wins on its source's "ai" tag. Without
+# this the agent answered "no news today, latest is September" while the feed held
+# same-day AI stories from Dev.to / Hacker News.
+_NEWS_FRESHNESS_RE = re.compile(
+    r"\b(?:today|tonight|latest|newest|new|recent|recently|this\s+week|now|"
+    r"сегодня|нов\w*|последн\w*|свеж\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _news_age_days(item, now=None):
+    raw = str(item.get("date") or item.get("published") or "").strip()
+    if not raw:
+        return None
+    try:
+        when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            from email.utils import parsedate_to_datetime
+            when = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, ((now or datetime.now(timezone.utc)) - when).total_seconds() / 86400)
+
+
+def _news_freshness_bonus(age_days):
+    if age_days is None:
+        return 0.0
+    return 4.0 if age_days <= 1 else 2.5 if age_days <= 3 else 1.0 if age_days <= 7 else 0.0
+
+
 def _news_rank_articles(message, articles, limit=8):
     """Rank the cached feed by keyword hits, then topic category, then recency.
 
@@ -3571,6 +3603,7 @@ def _news_rank_articles(message, articles, limit=8):
     # matches "said", "explain", "maintain" and buries the real AI stories.
     patterns = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in _news_keywords(message)]
     categories = _news_categories(message)
+    wants_fresh = bool(_NEWS_FRESHNESS_RE.search(message or ""))
     total = max(len(articles), 1)
     scored = []
     for index, item in enumerate(articles):
@@ -3579,6 +3612,8 @@ def _news_rank_articles(message, articles, limit=8):
         score = sum(3 if pattern.search(title) else 1 for pattern in patterns if pattern.search(blob))
         if item.get("category") in categories:
             score += 3
+        if wants_fresh:
+            score += _news_freshness_bonus(_news_age_days(item))
         scored.append((score + (total - index) / total, index, item))
     scored.sort(key=lambda row: (-row[0], row[1]))
     return [item for _, _, item in scored[:limit]]
