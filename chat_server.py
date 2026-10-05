@@ -3121,14 +3121,16 @@ AGENT_RAG_RE = re.compile(
     r"\b(?:alex|pavsky|pavlovsky|portfolio|resume|cv|experience|project|case study|"
     r"qa|quality|playwright|rag|ragas|giskard|promptfoo|deepeval|llm judge|"
     r"mcp|agentic|automation|testing|langfuse|langwatch|langsmith|langgraph|"
-    r"langchain|harness|prompt|observability|eval|red.?team)\b",
+    r"langchain|harness|prompt|observability|eval|red.?team|"
+    # Russian visitors: the same identity/portfolio cues, by stem.
+    r"алекс\w*|павловск\w*|павск\w*|портфолио|резюме|опыт\w*|проект\w*|кейс\w*|тестир\w*|автоматизац\w*)\b",
     re.IGNORECASE,
 )
 
 AGENT_NEWS_RE = re.compile(
     r"\b(?:news|headlines?|latest|newest|recent|recently|today|yesterday|this\s+week|this\s+month|"
     r"trending|breaking|just\s+(?:out|released|launched|announced)|announcements?|announced|"
-    r"released?|launch(?:ed|es|ing)?|what'?s\s+new|новост\w*|последн\w*|свеж\w*)\b",
+    r"released?|launch(?:ed|es|ing)?|what'?s\s+new|новост\w*|последн\w*|свеж\w*|что\s+нового)\b",
     re.IGNORECASE,
 )
 
@@ -3429,6 +3431,19 @@ def _rag_extractive_fallback(message, contexts, channel, history=None):
     return intro + "\n\n" + "\n".join(f"- {sentence}" for sentence in selected)
 
 
+def _reply_language_hint(message):
+    """Pin the reply language at the end of the turn.
+
+    The RAG Agent sends several KB of English context before a short question,
+    and small free models answer in the context's language — a system-prompt
+    rule alone did not hold for Russian questions. Recency does.
+    """
+    text = message or ""
+    cyrillic = sum(1 for ch in text if "\u0400" <= ch <= "\u04ff")
+    latin = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+    return "\n\nAnswer in Russian." if cyrillic > latin else ""
+
+
 def _rag_generate_from_contexts(message, contexts, channel, history=None):
     """Answer from retrieved chunks using this server's model pool and the conversation."""
     context_text = "\n\n---\n\n".join(str(chunk)[:1500] for chunk in contexts[:5])
@@ -3438,7 +3453,7 @@ def _rag_generate_from_contexts(message, contexts, channel, history=None):
     system = RAG_AGENT_SYSTEM + (VOICE_BREVITY if channel == "voice" else "")
     reply, _model, _err = _agent_generate(
         system,
-        f"Context:\n{context_text}\n\nQuestion: {message}",
+        f"Context:\n{context_text}\n\nQuestion: {message}{_reply_language_hint(message)}",
         max_tok=200 if channel == "voice" else 700,
         history=history,
         deadline=_agent_deadline(channel),

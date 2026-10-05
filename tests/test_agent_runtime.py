@@ -185,3 +185,27 @@ class PrivacyTests(unittest.TestCase):
         self.assertIn("alexpavsky", answer)
         self.assertNotIn("/Users/", answer)
         self.assertTrue(sources and all("/Users/" not in (src.get("content") or "") for src in sources))
+
+
+class LanguageTests(unittest.TestCase):
+    def test_reply_language_hint(self):
+        self.assertEqual(chat._reply_language_hint("Чем занимается Алекс и какой у него опыт в QA?"), "\n\nAnswer in Russian.")
+        self.assertEqual(chat._reply_language_hint("What projects has Alex built?"), "")
+        self.assertEqual(chat._reply_language_hint(""), "")
+
+    def test_rag_agent_prompt_pins_russian(self):
+        captured = {}
+
+        def fake_generate(system, user_content, **kwargs):
+            captured["user"] = user_content
+            return "ok", None, None
+
+        with patch.object(chat, "_agent_generate", side_effect=fake_generate):
+            chat._rag_generate_from_contexts("Чем занимается Алекс?", ["Alex builds QA tooling."], "chat")
+        self.assertTrue(captured["user"].endswith("Answer in Russian."))
+
+    def test_russian_questions_route_like_english(self):
+        route = lambda q: chat._supervisor_route(q, "chat")[0]
+        self.assertEqual(route("Какие проекты сделал Алекс?"), ["rag"])
+        self.assertEqual(route("Расскажи про опыт Павловского в QA"), ["rag"])
+        self.assertEqual(route("Что нового в мире AI?"), ["news"])
