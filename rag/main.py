@@ -39,6 +39,11 @@ except ImportError:  # Docker starts uvicorn from inside /app.
     from safety import safety_response
 
 try:
+    from .redaction import redact_local_paths
+except ImportError:  # Docker starts uvicorn from inside /app.
+    from redaction import redact_local_paths
+
+try:
     import PyPDF2
 except ImportError:
     PyPDF2 = None  # type: ignore
@@ -976,6 +981,10 @@ def rag_metrics():
     for r in rows:
         if isinstance(r.get("created_at"), datetime):
             r["created_at"] = r["created_at"].isoformat()
+
+        for field in ("query", "answer"):
+            if isinstance(r.get(field), str):
+                r[field] = redact_local_paths(r[field])
 
     return {
         "queries": rows,
