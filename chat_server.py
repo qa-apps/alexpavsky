@@ -3158,7 +3158,8 @@ NEWS_AGENT_SYSTEM = (
     "Name the concrete tools, models and releases, and attribute each item to its source like [Source]. "
     "Never invent an article, date, or number that is not in the list. "
     "If nothing in the list matches the question exactly, say that in one short sentence and then "
-    "summarise the most relevant recent items you do have — never answer with only a refusal."
+    "summarise the most relevant recent items you do have — never answer with only a refusal. "
+    "Reply in the language of the user's question, even when the articles are in English."
 )
 
 SUPERVISOR_SYSTEM = (
@@ -3349,7 +3350,8 @@ RAG_AGENT_SYSTEM = (
     "his portfolio and QA / AI-testing knowledge base, plus the earlier conversation. "
     "Be specific and concrete. If the question is about something the user said earlier, answer from "
     "the conversation. If neither the context nor the conversation covers it, say so plainly "
-    "instead of guessing."
+    "instead of guessing. "
+    "Reply in the language of the user's question, even when the context is in another language."
 )
 
 # The RAG service runs its own model pool and, when every provider there fails,
