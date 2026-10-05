@@ -11,9 +11,11 @@ Endpoints:
   GET  /api/health           — liveness + dependency check
 """
 import io
+import json
 import logging
 import os
 import textwrap
+import time
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -35,9 +37,9 @@ except ImportError:  # Docker starts uvicorn from inside /app.
     from safety import safety_response
 
 try:
-    import pypdf
+    import PyPDF2
 except ImportError:
-    pypdf = None  # type: ignore
+    PyPDF2 = None  # type: ignore
 
 import tiktoken
 
@@ -53,10 +55,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # Embeddings: local sentence-transformers (no API key needed)
-# Generation: free-tier provider pool only.
+# Generation: OpenRouter (already configured with key rotation)
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBED_DIM = 384
-USE_OPENAI_EMBED = False
 LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"  # via OpenRouter free tier
 QDRANT_COLLECTION = "documents"
 CHUNK_TOKENS = 500
@@ -75,16 +76,22 @@ log = logging.getLogger("rag-api")
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
-openai_client = None
-
-# Local sentence-transformers model (loaded once at startup)
+# Local sentence-transformers model (loaded once at startup). The model is
+# pre-seeded into a persistent cache by deployment; never contact Hugging Face
+# on the request path, where an expired token used to break every RAG query.
 _st_model = None
 def get_st_model():
     global _st_model
     if _st_model is None:
         from sentence_transformers import SentenceTransformer
-        log.info("Loading sentence-transformers model (first run, ~90MB)...")
-        _st_model = SentenceTransformer("all-MiniLM-L6-v2")
+        log.info("Loading sentence-transformers model (local cache first)...")
+        try:
+            _st_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+        except Exception:
+            # Fresh container without the cached model: the embedding model is
+            # public, so download anonymously — an expired HF_TOKEN (used only by
+            # the optional generation provider) must not break retrieval startup.
+            _st_model = SentenceTransformer("all-MiniLM-L6-v2", token=False)
         log.info("Model loaded.")
     return _st_model
 
@@ -121,9 +128,6 @@ def embed(texts: list[str]) -> list[list[float]]:
     """Batch embed texts — local sentence-transformers (no API key needed)."""
     if not texts:
         return []
-    if USE_OPENAI_EMBED and openai_client:
-        resp = openai_client.embeddings.create(model="text-embedding-3-small", input=texts)
-        return [item.embedding for item in resp.data]
     # Local sentence-transformers — free, no rate limits
     model = get_st_model()
     vecs = model.encode(texts, normalize_embeddings=True)
@@ -160,9 +164,9 @@ def chunk_text(text: str) -> list[str]:
 
 
 def extract_pdf_text(data: bytes) -> str:
-    if pypdf is None:
-        raise HTTPException(500, "pypdf not installed")
-    reader = pypdf.PdfReader(io.BytesIO(data))
+    if PyPDF2 is None:
+        raise HTTPException(500, "PyPDF2 not installed")
+    reader = PyPDF2.PdfReader(io.BytesIO(data))
     pages = [page.extract_text() or "" for page in reader.pages]
     return "\n".join(pages)
 
@@ -201,54 +205,245 @@ def extract_text(data: bytes, filename: str) -> str:
     raise HTTPException(400, f"Unsupported file type: {filename}")
 
 
-# Provider pool for LLM generation — each provider tried in order on failure.
-# All speak the OpenAI chat-completions wire format, so one POST helper works.
-_LLM_PROVIDERS = [
-    ("groq",       "GROQ_API_KEY",       "https://api.groq.com/openai/v1",       "llama-3.3-70b-versatile"),
-    ("cerebras",   "CEREBRAS_API_KEY",   "https://api.cerebras.ai/v1",           "llama-3.3-70b"),
-    ("sambanova",  "SAMBANOVA_API_KEY",  "https://api.sambanova.ai/v1",          "Meta-Llama-3.3-70B-Instruct"),
-    ("mistral",    "MISTRAL_API_KEY",    "https://api.mistral.ai/v1",            "mistral-small-latest"),
-    ("or-llama",   "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",         "meta-llama/llama-3.3-70b-instruct:free"),
-    ("or-deepseek","OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",         "deepseek/deepseek-r1-0528:free"),
-    ("or-qwen",    "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",         "qwen/qwen3-coder:free"),
-    ("hf-router",  "HF_TOKEN",           "https://router.huggingface.co/v1",     "meta-llama/Llama-3.3-70B-Instruct:cerebras"),
+# Every enabled provider is on the account's free/evaluation plan. OpenRouter is
+# stricter still: only the free router or model ids ending in :free may execute.
+_FREE_PROVIDER_CONFIG = {
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1"),
+    "nvidia": ("NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1"),
+    "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+    "mistral": ("MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
+    "cohere": ("COHERE_API_KEY", "https://api.cohere.ai/compatibility/v1"),
+    "huggingface": ("HF_INFERENCE_TOKEN", "https://router.huggingface.co/v1"),
+    "local": ("", os.environ.get("BOSGAME_OLLAMA_URL", "http://172.18.0.1:11434").rstrip("/") + "/v1"),
+}
+
+
+def _cloudflare_base_url() -> str:
+    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+    if not account_id:
+        return ""
+    return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+
+
+def _provider_config(provider: str):
+    if provider == "cloudflare":
+        base_url = _cloudflare_base_url()
+        return ("CLOUDFLARE_API_TOKEN", base_url) if base_url else None
+    return _FREE_PROVIDER_CONFIG.get(provider)
+
+
+# Known-good routes make cold starts fast. The curator registry below adds every
+# other recently verified free model and is mounted read-only into the container.
+_STATIC_LLM_PROVIDERS = [
+    ("groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b", "free"),
+    ("nvidia", "NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1", "meta/llama-3.2-11b-vision-instruct", "free"),
+    ("cloudflare", "CLOUDFLARE_API_TOKEN", _cloudflare_base_url(), "@cf/ibm-granite/granite-4.0-h-micro", "free"),
+    ("cohere", "COHERE_API_KEY", "https://api.cohere.ai/compatibility/v1", "command-r7b-12-2024", "free"),
+    ("huggingface", "HF_INFERENCE_TOKEN", "https://router.huggingface.co/v1", "meta-llama/Llama-3.1-8B-Instruct", "free"),
+    ("mistral", "MISTRAL_API_KEY", "https://api.mistral.ai/v1", "codestral-2508", "free"),
+    ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "openrouter/free", "free"),
+    ("local", "", os.environ.get("BOSGAME_OLLAMA_URL", "http://172.18.0.1:11434").rstrip("/") + "/v1", "gpt-oss:120b", "free"),
 ]
 
 
-def call_llm(prompt: str, system: str = "") -> str:
-    """Call LLM with rotation across all available providers.
+def _load_curated_llm_providers():
+    configured = os.environ.get("LLM_REGISTRY_FILE", "/curator-data/models_registry.json")
+    paths = (configured, "/app/models_registry.json")
+    models = None
+    for path in dict.fromkeys(paths):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                models = json.load(handle).get("models", [])
+            break
+        except (OSError, ValueError, AttributeError):
+            continue
+    if models is None:
+        return []
 
-    Tries each provider in _LLM_PROVIDERS order; switches to the next on any
-    non-200 response or exception. Returns a fallback string only if every
-    provider fails.
-    """
+    rows = []
+    for model in models:
+        provider = str(model.get("provider", ""))
+        model_id = str(model.get("id", ""))
+        config = _provider_config(provider)
+        if not config or not model_id or not model.get("free"):
+            continue
+        if provider == "openrouter" and not model_id.endswith(":free"):
+            continue
+        key_env, base_url = config
+        if base_url:
+            rows.append((provider, key_env, base_url, model_id, "free"))
+    return rows
+
+
+def _build_llm_provider_pool():
+    rows = []
+    seen = set()
+    for row in _STATIC_LLM_PROVIDERS + _load_curated_llm_providers():
+        provider, _key_env, base_url, model, _tier = row
+        key = (provider, model)
+        if base_url and key not in seen:
+            rows.append(row)
+            seen.add(key)
+    # Local inference is deliberately the final reserve after every cloud pool.
+    rows.sort(key=lambda row: row[0] == "local")
+    return rows
+
+
+_LLM_PROVIDERS = _build_llm_provider_pool()
+log.info(
+    "llm_free_pool models=%d providers=%s",
+    len(_LLM_PROVIDERS),
+    ",".join(sorted({row[0] for row in _LLM_PROVIDERS})),
+)
+
+# Cooldown keyed by rate-limit bucket id (not raw key alone).
+_PROVIDER_COOLDOWN = {}  # bucket_id -> unix ts until usable
+_MODEL_COOLDOWN = {}  # (provider, model) -> unix ts until usable
+_COOLDOWN_SECONDS = float(os.environ.get("LLM_COOLDOWN_SECONDS", "60"))
+_ATTEMPT_TIMEOUT = float(os.environ.get("LLM_ATTEMPT_TIMEOUT", "6"))
+_LOCAL_ATTEMPT_TIMEOUT = float(os.environ.get("LOCAL_LLM_TIMEOUT", "75"))
+
+
+def _normalize_tier(tier) -> str:
+    """Accept legacy bool free flags and new tier strings."""
+    if tier is True:
+        return "free"
+    if tier is False:
+        return "blocked"
+    t = str(tier or "blocked").strip().lower()
+    if t in ("free", "credits", "blocked", "paid"):
+        return "credits" if t == "paid" else t
+    if str(tier).endswith(":free"):
+        return "free"
+    return "blocked"
+
+
+def _bucket_id(key_env: str, tier: str) -> str:
+    """OpenRouter free vs credits are separate rate-limit pools on one key."""
+    tier = _normalize_tier(tier)
+    if key_env == "OPENROUTER_API_KEY":
+        return f"{key_env}:{tier}"
+    return key_env
+
+
+def _is_allowed(provider: str, model: str, tier) -> bool:
+    tier = _normalize_tier(tier)
+    if provider == "openrouter":
+        return model == "openrouter/free" or str(model).endswith(":free")
+    return tier == "free" and provider in {*_FREE_PROVIDER_CONFIG, "cloudflare"}
+
+
+def _cool_bucket(bucket_id: str, seconds: float = None) -> None:
+    until = time.time() + (seconds if seconds is not None else _COOLDOWN_SECONDS)
+    prev = _PROVIDER_COOLDOWN.get(bucket_id, 0.0)
+    if until > prev:
+        _PROVIDER_COOLDOWN[bucket_id] = until
+        log.info("llm_bucket_cooldown bucket=%s for=%.0fs", bucket_id, until - time.time())
+
+
+def _cool_model(provider: str, model: str, seconds: float = None) -> None:
+    until = time.time() + (seconds if seconds is not None else _COOLDOWN_SECONDS)
+    key = (provider, model)
+    if until > _MODEL_COOLDOWN.get(key, 0.0):
+        _MODEL_COOLDOWN[key] = until
+
+
+def _provider_api_key(key_env: str) -> str:
+    value = os.environ.get(key_env, "").strip()
+    if value or key_env != "HF_INFERENCE_TOKEN":
+        return value
+    try:
+        with open("/app/.hf-inference-token", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def _response_content(response: httpx.Response) -> str:
+    try:
+        content = response.json()["choices"][0]["message"].get("content", "")
+    except (ValueError, KeyError, IndexError, TypeError):
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "\n".join(
+            str(item.get("text", "")).strip()
+            for item in content
+            if isinstance(item, dict) and item.get("text")
+        ).strip()
+    return ""
+
+
+def call_llm(prompt: str, system: str = "", max_tokens: int = 1024, timeout: float = 15.0) -> str:
+    """Call the curated free-only pool with bounded failover latency."""
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
     last_error = None
-    for name, key_env, base_url, model in _LLM_PROVIDERS:
-        key = os.environ.get(key_env, "").strip()
-        if not key:
+    deadline = time.monotonic() + max(1.0, float(timeout))
+    for provider, key_env, base_url, model, tier in _LLM_PROVIDERS:
+        tier_n = _normalize_tier(tier)
+        if not _is_allowed(provider, model, tier_n):
+            continue
+        now = time.time()
+        bid = _bucket_id(key_env, tier_n)
+        if _PROVIDER_COOLDOWN.get(bid, 0.0) > now:
+            continue
+        if _MODEL_COOLDOWN.get((provider, model), 0.0) > now:
+            continue
+        key = _provider_api_key(key_env)
+        if not key and provider != "local":
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.25 and provider != "local":
+            last_error = "cloud request deadline reached"
             continue
         try:
+            request_max_tokens = int(max_tokens)
+            if "gpt-oss" in model:
+                request_max_tokens = max(request_max_tokens, 256)
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "AlexPavsky-Free-Orchestrator/1.0",
+                "HTTP-Referer": "https://alexpavsky.com",
+                "X-Title": "AlexPavsky Voice/RAG",
+            }
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
             r = httpx.post(
                 f"{base_url}/chat/completions",
-                json={"model": model, "messages": messages, "max_tokens": 1024},
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "HTTP-Referer": "https://alexpavsky.com",
-                },
-                timeout=45,
+                json={"model": model, "messages": messages, "max_tokens": request_max_tokens},
+                headers=headers,
+                timeout=_LOCAL_ATTEMPT_TIMEOUT if provider == "local" else min(_ATTEMPT_TIMEOUT, remaining),
             )
-            if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"].strip()
-            last_error = f"{name}/{model} HTTP {r.status_code}"
-            log.warning("%s, trying next provider", last_error)
-        except Exception as e:
-            last_error = f"{name}/{model} {type(e).__name__}"
-            log.warning("%s, trying next provider", last_error)
+            content = _response_content(r) if r.status_code == 200 else ""
+            if content:
+                log.info("llm_ok provider=%s model=%s tier=%s", provider, model, tier_n)
+                return content
+
+            last_error = f"{provider}/{model} HTTP {r.status_code}" if r.status_code != 200 else f"{provider}/{model} empty response"
+            if r.status_code in (401, 402, 403, 429):
+                retry_after = r.headers.get("retry-after", "")
+                try:
+                    cooldown = min(max(float(retry_after), 60.0), 3600.0)
+                except (TypeError, ValueError):
+                    cooldown = 3600.0 if r.status_code in (401, 402, 403) else 120.0
+                _cool_bucket(bid, cooldown)
+            elif r.status_code in (404, 410):
+                _cool_model(provider, model, 24 * 3600)
+            elif r.status_code >= 500:
+                _cool_model(provider, model, 90)
+            else:
+                _cool_model(provider, model, 120)
+            log.warning("%s, trying next free model", last_error)
+        except Exception as exc:
+            _cool_model(provider, model, 60)
+            last_error = f"{provider}/{model} {type(exc).__name__}"
+            log.warning("%s, trying next free model", last_error)
 
     return f"LLM unavailable — all providers failed. Last error: {last_error or 'no keys set'}"
 
@@ -401,6 +596,20 @@ class QueryRequest(BaseModel):
     document_id: Optional[str] = None
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Opt-in tuning for low-latency callers (e.g. the voice agent). Both default
+    # to the historic behavior, so the website chat is unaffected.
+    #   skip_metrics: don't run the two extra Ragas LLM calls (faithfulness +
+    #     answer_relevancy) — removes ~2/3 of the per-query LLM latency.
+    #   system: override the answer system prompt (e.g. a brief spoken-voice persona).
+    skip_metrics: bool = False
+    system: Optional[str] = None
+    # Low-latency callers (voice) may cap how many context chunks reach the LLM.
+    max_context_chunks: Optional[int] = None
+    # Cap generation length (voice wants short spoken answers).
+    max_tokens: Optional[int] = None
+    # Agent runtime: return retrieved context + sources without generating, so
+    # the chat-side RAG Agent writes the answer from the shared free-model pool.
+    retrieve_only: bool = False
 
 
 @app.post("/api/rag/query")
@@ -461,16 +670,25 @@ async def rag_query(req: QueryRequest):
             must=[FieldCondition(key="document_id", match=MatchValue(value=req.document_id))]
         )
 
-    q_hits = qdrant_client.query_points(
+    q_hits = qdrant_client.search(
         collection_name=QDRANT_COLLECTION,
-        query=query_vec,
+        query_vector=query_vec,
         limit=RAG_TOP_K,
         query_filter=qdrant_filter,
-    ).points
+    )
     qdrant_results = [
-        {"content": h.payload.get("content", ""), "score": h.score, "chunk_index": h.payload.get("chunk_index")}
+        {
+            "content": h.payload.get("content", ""),
+            "score": h.score,
+            "chunk_index": h.payload.get("chunk_index"),
+            "filename": h.payload.get("filename"),
+        }
         for h in q_hits
     ]
+
+    result_limit = max(1, min(req.max_context_chunks or RAG_TOP_K, RAG_TOP_K))
+    pg_results = pg_results[:result_limit]
+    qdrant_results = qdrant_results[:result_limit]
 
     # Build context from pgvector results (primary), fall back to qdrant
     context_chunks = [r["content"] for r in pg_results] or [r["content"] for r in qdrant_results]
@@ -478,19 +696,60 @@ async def rag_query(req: QueryRequest):
     if not context_chunks:
         raise HTTPException(404, "No relevant documents found. Upload documents first.")
 
+    # Low-latency callers (voice) can cap the context chunks fed to the LLM:
+    # fewer chunks keep the prompt under the fast 8B model's payload limit
+    # (avoids its 413 fallthrough) and speed generation. Default keeps all.
+    if req.max_context_chunks and req.max_context_chunks > 0:
+        context_chunks = context_chunks[: req.max_context_chunks]
+
+    source_rows = pg_results or qdrant_results
+    sources = [
+        {
+            "content": r["content"][:300],
+            "score": float(r["score"]),
+            "filename": r.get("filename"),
+        }
+        for r in source_rows
+    ]
+
+    if req.retrieve_only:
+        return {
+            "answer": "",
+            "sources": sources,
+            "contexts": context_chunks,
+            "metrics": {},
+            "retrieve_only": True,
+        }
+
     context_text = "\n\n---\n\n".join(context_chunks)
 
     # --- LLM answer ---
-    system_prompt = (
+    system_prompt = (req.system or "").strip() or (
         "You are a helpful assistant. Answer the user's question using ONLY the provided context. "
         "If the context does not contain enough information, say so clearly."
     )
     user_prompt = f"Context:\n{context_text}\n\nQuestion: {req.query}"
-    answer = call_llm(user_prompt, system=system_prompt)
+    # Voice / low-latency: short answers + tighter provider timeout.
+    gen_max_tokens = int(req.max_tokens) if req.max_tokens and req.max_tokens > 0 else 1024
+    gen_timeout = 12.0 if req.skip_metrics else 20.0
+    if req.skip_metrics and not req.max_tokens:
+        gen_max_tokens = 180  # ~2 short spoken sentences
+    answer = call_llm(
+        user_prompt,
+        system=system_prompt,
+        max_tokens=gen_max_tokens,
+        timeout=gen_timeout,
+    )
 
     # --- Metrics ---
-    faithfulness = compute_faithfulness(answer, context_chunks)
-    answer_relevancy = compute_answer_relevancy(req.query, answer)
+    # Low-latency callers (voice) skip the two extra Ragas LLM calls; the columns
+    # are nullable, so we simply persist NULL and return null metrics.
+    if req.skip_metrics:
+        faithfulness = None
+        answer_relevancy = None
+    else:
+        faithfulness = compute_faithfulness(answer, context_chunks)
+        answer_relevancy = compute_answer_relevancy(req.query, answer)
 
     # --- Persist to DB ---
     conn = get_pg()
@@ -518,8 +777,6 @@ async def rag_query(req: QueryRequest):
     finally:
         conn.close()
 
-    sources = [{"content": r["content"][:300], "score": float(r["score"]), "filename": r.get("filename")} for r in pg_results]
-
     return {
         "answer": answer,
         "sources": sources,
@@ -528,8 +785,8 @@ async def rag_query(req: QueryRequest):
         # read this instead of `sources[].content`, which is a 300-char preview.
         "contexts": context_chunks,
         "metrics": {
-            "faithfulness": round(faithfulness, 4),
-            "answer_relevancy": round(answer_relevancy, 4),
+            "faithfulness": round(faithfulness, 4) if faithfulness is not None else None,
+            "answer_relevancy": round(answer_relevancy, 4) if answer_relevancy is not None else None,
         },
         "pgvector_results": [{"content": r["content"][:200], "score": float(r["score"])} for r in pg_results],
         "qdrant_results": [{"content": r["content"][:200], "score": round(r["score"], 4)} for r in qdrant_results],

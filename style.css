@@ -3833,6 +3833,40 @@ button.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
     object-fit: contain;
 }
 
+/* Agent trace: supervisor → specialist chain rendered under each bot reply */
+.agent-trace {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+.agent-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    color: var(--accent);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.agent-arrow { color: var(--text-dim); font-size: 0.65rem; }
+.agent-sources { margin-top: 0.45rem; font-size: 0.72rem; color: var(--text-secondary); }
+.agent-sources summary { cursor: pointer; color: var(--text-dim); }
+.agent-sources summary:hover { color: var(--accent); }
+.agent-sources ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+.agent-sources li { margin: 0.15rem 0; }
+.agent-sources a { color: var(--accent); text-decoration: none; }
+.agent-sources a:hover { text-decoration: underline; }
+.agent-source-meta { color: var(--text-dim); font-size: 0.68rem; }
+body.light-mode .agent-chip { background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.25); }
+
 .typing-indicator { display: flex; gap: 4px; padding: 0.75rem 1rem; align-items: center; }
 .typing-dot {
     width: 7px; height: 7px; background: var(--text-dim);
