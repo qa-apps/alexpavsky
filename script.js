@@ -3849,10 +3849,58 @@
             }).join('') + '</div>';
         }
 
-        function addBotMessage(text, images) {
+        // Which specialist agents the supervisor actually called. Shown under
+        // each reply so the agentic workflow is visible, not just traced.
+        var AGENT_TRACE_LABELS = {
+            supervisor_route: 'Supervisor',
+            rag_agent: 'RAG Agent',
+            news_agent: 'News Agent',
+            general_agent: 'General Agent',
+            synthesis_agent: 'Synthesis',
+            local_fallback: 'Local fallback'
+        };
+
+        function safeHttpUrl(value) {
+            try {
+                var parsed = new URL(String(value || ''), window.location.href);
+                return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : '';
+            } catch (_) { return ''; }
+        }
+
+        function renderAgentSources(sources) {
+            var items = (sources || []).slice(0, 5).map(function (src) {
+                if (!src || typeof src !== 'object') return '';
+                var link = safeHttpUrl(src.link);
+                if (src.kind === 'article' && link) {
+                    var title = escapeHtml(String(src.title || src.source || link));
+                    var origin = src.source ? ' <span class="agent-source-meta">' + escapeHtml(String(src.source)) + '</span>' : '';
+                    return '<li><a href="' + escapeHtml(link) + '" target="_blank" rel="noopener noreferrer">' + title + '</a>' + origin + '</li>';
+                }
+                if (src.filename) {
+                    var score = typeof src.score === 'number' ? ' <span class="agent-source-meta">' + src.score.toFixed(2) + '</span>' : '';
+                    return '<li>' + escapeHtml(String(src.filename)) + score + '</li>';
+                }
+                return '';
+            }).filter(Boolean).join('');
+            return items ? '<details class="agent-sources"><summary>Sources</summary><ul>' + items + '</ul></details>' : '';
+        }
+
+        function renderAgentTrace(meta) {
+            if (!meta) return '';
+            var agents = (meta.agents || []).filter(function (name) {
+                return Object.prototype.hasOwnProperty.call(AGENT_TRACE_LABELS, name);
+            });
+            if (!agents.length) return '';
+            var chain = agents.map(function (name) {
+                return '<span class="agent-chip">' + escapeHtml(AGENT_TRACE_LABELS[name]) + '</span>';
+            }).join('<span class="agent-arrow">→</span>');
+            return '<div class="agent-trace">' + chain + '</div>' + renderAgentSources(meta.sources);
+        }
+
+        function addBotMessage(text, images, meta) {
             var div = document.createElement('div');
             div.className = 'chat-message bot-message';
-            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content">' + renderBotMarkdown(text || '') + renderBotImages(images) + '</div>';
+            div.innerHTML = '<div class="message-avatar"><i class="fas fa-robot"></i></div><div class="message-content">' + renderBotMarkdown(text || '') + renderBotImages(images) + renderAgentTrace(meta) + '</div>';
             chatMessages.appendChild(div);
             scrollToBottom();
         }
@@ -3911,7 +3959,7 @@
                 conversationHistory.push({ role: 'user', content: userMessage || '[attachment]' });
                 var response = await fetch(apiUrl('/api/chat'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: authHeaders(),
                     credentials: 'same-origin',
                     signal: currentAbort.signal,
                     body: JSON.stringify({ message: userMessage, attachments: attachments || [], history: conversationHistory.slice(0, -1) })
@@ -3938,7 +3986,10 @@
                 var botMsg = sanitizeBotReply(reply, userMessage) || 'Sorry, I didn\'t get a response. Please try again.';
                 conversationHistory.push({ role: 'assistant', content: botMsg });
                 if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-30);
-                addBotMessage(botMsg, images);
+                addBotMessage(botMsg, images, {
+                    agents: data && data.agents_used,
+                    sources: data && data.sources
+                });
 
             } catch (error) {
                 hideTypingIndicator();

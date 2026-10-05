@@ -222,6 +222,11 @@ def _sqlite_init_db():
     cols = [r[1] for r in c.execute("PRAGMA table_info(forum_posts)").fetchall()]
     if "parent_id" not in cols:
         c.execute("ALTER TABLE forum_posts ADD COLUMN parent_id TEXT")
+    # Migrate: chat_logs.user_id lets signed-in visitors resume a conversation
+    chat_cols = [r[1] for r in c.execute("PRAGMA table_info(chat_logs)").fetchall()]
+    if "user_id" not in chat_cols:
+        c.execute("ALTER TABLE chat_logs ADD COLUMN user_id TEXT")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_logs(user_id, created_at)")
     conn.commit()
     conn.close()
 
@@ -324,6 +329,9 @@ def _pg_init_db():
             used BOOLEAN NOT NULL DEFAULT FALSE
         )
         """,
+        # Runs after users exists: lets signed-in visitors resume a conversation.
+        "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_logs(user_id, created_at)",
     ]
     try:
         for statement in statements:
@@ -349,7 +357,7 @@ def _backup_sqlite_from_postgres():
         "subscribers": ("id", "email", "ip_hash", "created_at"),
         "messages": ("id", "user_id", "sender", "text", "created_at"),
         "forum_posts": ("id", "user_id", "user_name", "text", "created_at", "parent_id"),
-        "chat_logs": ("id", "session_id", "ip_hash", "role", "message", "model", "created_at"),
+        "chat_logs": ("id", "session_id", "ip_hash", "role", "message", "model", "created_at", "user_id"),
         "newsletter_runs": (
             "id", "week_key", "run_type", "status", "subject", "article_count",
             "subscriber_count", "sent_count", "created_at", "completed_at", "error",
@@ -393,18 +401,46 @@ def _sqlite_backup_loop():
         time.sleep(int(os.environ.get("SQLITE_BACKUP_INTERVAL_SECONDS", "300") or "300"))
 
 
-def _log_message(session_id, ip_hash, role, message, model=None):
+def _log_message(session_id, ip_hash, role, message, model=None, user_id=None):
     try:
         with _db_lock:
             conn = _db()
             conn.execute(
-                "INSERT INTO chat_logs (id, session_id, ip_hash, role, message, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (uuid.uuid4().hex, session_id, ip_hash, role, message[:50000], model, time.time()),
+                "INSERT INTO chat_logs (id, session_id, ip_hash, role, message, model, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, session_id, ip_hash, role, message[:50000], model, time.time(), user_id),
             )
             conn.commit()
             conn.close()
     except Exception as e:
         log.warning("db log error: %s", e)
+
+
+def _recent_user_turns(user_id, limit=10):
+    """Last few chat turns of a signed-in visitor, oldest first.
+
+    Used to resume a conversation when the browser sends no history (new tab,
+    другое устройство, cleared session) — that is the whole point of signing in.
+    """
+    if not user_id:
+        return []
+    try:
+        with _db_lock:
+            conn = _db()
+            rows = conn.execute(
+                "SELECT role, message FROM chat_logs WHERE user_id = ? AND role IN ('user', 'assistant') "
+                "ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+            conn.close()
+    except Exception as e:
+        log.warning("db history error: %s", e)
+        return []
+    turns = []
+    for row in reversed(rows):
+        content = _clean(row["message"], 4000)
+        if content:
+            turns.append({"role": row["role"], "content": content})
+    return turns
 
 
 def _hash_ip(ip):
@@ -542,6 +578,8 @@ def _load_dotenv():
 
 _load_dotenv()
 
+import observability as lfobs
+
 MAINTENANCE_FLAG = Path(__file__).resolve().parent / "maintenance.flag"
 # Never fall back to a hardcoded default — the previous default was already
 # committed to git history. If MAINTENANCE_KEY is missing in env, generate a
@@ -588,6 +626,7 @@ NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 OPENROUTER_REFERER = "https://alexpavsky.com"
 OPENROUTER_TITLE = "AlexPavsky AI Chat"
 RSS2JSON_API_URL = "https://api.rss2json.com/v1/api.json?rss_url="
+RAG_API_URL = os.environ.get("RAG_API_URL", "http://127.0.0.1:8001").rstrip("/")
 
 RSS_SOURCES = [
     # AI & LLM
@@ -659,6 +698,11 @@ _BLOCKED_PAID_PROVIDERS = {"gemini", "openai", "anthropic", "azure", "vertex"}
 _APPROVED_FREE_DIRECT_PROVIDERS = {
     "nvidia", "groq", "huggingface", "mistral", "cohere", "cloudflare", "local",
 }
+NON_CHAT_MODEL_HINTS = ("guard", "moderation", "shield", "safety", "embed", "rerank", "whisper", "tts")
+
+
+def _is_chat_capable_model_id(model_id):
+    return not any(hint in str(model_id).lower() for hint in NON_CHAT_MODEL_HINTS)
 
 
 def _site_route_allowed(model):
@@ -666,6 +710,9 @@ def _site_route_allowed(model):
         return False
     provider = str(model.get("provider", ""))
     model_id = str(model.get("id", ""))
+    label = str(model.get("label", ""))
+    if not _is_chat_capable_model_id(model_id) or not _is_chat_capable_model_id(label):
+        return False
     if provider in _BLOCKED_PAID_PROVIDERS:
         return False
     if provider == "openrouter":
@@ -2398,8 +2445,7 @@ _SIMPLE = re.compile(
     r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|"
     r"thanks|thank\s+you|ok|okay|"
     r"yes|no|bye|"
-    r"how\s+are\s+you|"
-    r"what\s+(?:is|are)\s+\w+\??|who\s+(?:is|are)\s+\w+\??)$",
+    r"how\s+are\s+you)[!?.]*$",
     re.IGNORECASE,
 )
 
@@ -2524,7 +2570,13 @@ def _cooldown_target(model, err):
         return "provider", _health_key("provider", provider), 3600, "credits_or_billing"
 
     if status in (401, 403):
-        if provider == "groq" or "error code: 1010" in body or "invalid api key" in body or "unauthorized" in body:
+        # A bad/expired key is a provider-wide problem. Without this, every
+        # model of that provider gets tried once before being benched, which
+        # eats a whole turn's retry budget on requests that cannot succeed.
+        if (provider == "groq" or "error code: 1010" in body or "invalid api key" in body
+                or "unauthorized" in body or "invalid credentials" in body
+                or "invalid username or password" in body or "authentication" in body
+                or "is expired" in body or "access token" in body or "api key" in body):
             return "provider", _health_key("provider", provider), 3600, "provider_access_denied"
         return "model", _health_key("model", provider, model_id), 3600, "model_access_denied"
 
@@ -3036,6 +3088,832 @@ def _sanitize_tool_call_reply(reply, message):
     return reply
 
 
+# Some free reasoning models emit their scratchpad instead of an answer. Strip
+# the tagged form; treat a reply that *starts* as a scratchpad as a bad
+# generation so the caller can try the next model.
+THINK_TAG_RE = re.compile(r"<(think|thinking|reasoning)>[\s\S]*?</\1>", re.IGNORECASE)
+REASONING_LEAK_RE = re.compile(
+    r"^\s*(?:<think|here'?s\s+(?:a\s+|my\s+)?thinking\s+process|thinking\s+process\s*:|"
+    r"(?:okay|ok|alright)[,!]?\s+(?:so\s+)?let'?s\s+(?:think|break|analyz)|let me think\b|"
+    r"first,?\s+i\s+need\s+to\s+(?:understand|figure|analyz))",
+    re.IGNORECASE,
+)
+# Output of a moderation/guard model that slipped into the pool.
+MODERATION_ARTIFACT_RE = re.compile(
+    r"^\s*(?:(?:user|assistant|agent)?\s*safety\s*[:\-]\s*)?(?:safe|unsafe)\s*(?:[\r\n].*)?$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _clean_model_reply(reply):
+    return THINK_TAG_RE.sub("", reply or "").strip()
+
+
+def _reply_is_usable(reply):
+    if not reply:
+        return False
+    if REASONING_LEAK_RE.match(reply):
+        return False
+    return not (len(reply) < 120 and MODERATION_ARTIFACT_RE.match(reply))
+
+
+AGENT_RAG_RE = re.compile(
+    r"\b(?:alex|pavsky|pavlovsky|portfolio|resume|cv|experience|project|case study|"
+    r"qa|quality|playwright|rag|ragas|giskard|promptfoo|deepeval|llm judge|"
+    r"mcp|agentic|automation|testing|langfuse|langwatch|langsmith|langgraph|"
+    r"langchain|harness|prompt|observability|eval|red.?team)\b",
+    re.IGNORECASE,
+)
+
+AGENT_NEWS_RE = re.compile(
+    r"\b(?:news|headlines?|latest|newest|recent|recently|today|yesterday|this\s+week|this\s+month|"
+    r"trending|breaking|just\s+(?:out|released|launched|announced)|announcements?|announced|"
+    r"released?|launch(?:ed|es|ing)?|what'?s\s+new|новост\w*|последн\w*|свеж\w*)\b",
+    re.IGNORECASE,
+)
+
+VOICE_AGENT_SYSTEM = (
+    "You are Alex Pavlovsky's friendly QA and AI-testing voice assistant. "
+    "Your domain includes Playwright, prompt engineering, promptfoo, RAG, RAGAS, "
+    "DeepEval, agent harnesses, agentic workflows, MCP, LangChain, LangGraph, "
+    "LangSmith, Langfuse, LangWatch, observability, and CI quality gates. "
+    "Answer using the provided context when it is relevant. If context is thin "
+    "but the question is clearly in this domain, give a short accurate answer. "
+    "Be specific. Reply in AT MOST 2 short spoken sentences under 40 words total. "
+    "Plain text only: no markdown, no lists, no preamble. "
+    "Only if the question is clearly unrelated (cooking, sports, celebrity gossip) "
+    "say it is outside your QA focus in one sentence."
+)
+
+# Appended to a specialist's system prompt when the turn arrives over the voice
+# channel, so every agent answers in something a TTS engine can speak.
+VOICE_BREVITY = (
+    " Reply in AT MOST 2 short spoken sentences under 40 words total. "
+    "Plain text only: no markdown, no lists, no URLs."
+)
+
+NEWS_AGENT_SYSTEM = (
+    "You are the News Agent on Alex Pavlovsky's AI/QA news desk. "
+    "Answer only from the article list you are given — it is the site's live RSS feed. "
+    "Name the concrete tools, models and releases, and attribute each item to its source like [Source]. "
+    "Never invent an article, date, or number that is not in the list. "
+    "If nothing in the list matches the question exactly, say that in one short sentence and then "
+    "summarise the most relevant recent items you do have — never answer with only a refusal."
+)
+
+SUPERVISOR_SYSTEM = (
+    "You are the supervisor of a multi-agent assistant on alexpavsky.com. "
+    "Choose which specialist agent(s) should answer the user's message.\n"
+    "rag — Alex Pavlovsky himself (bio, resume, experience, projects, case studies) and his QA / AI-testing "
+    "knowledge base: Playwright, promptfoo, DeepEval, RAGAS, Giskard, LangChain, LangGraph, LangSmith, "
+    "Langfuse, MCP, agent harnesses, red teaming, CI quality gates.\n"
+    "news — what is new, recent or trending in AI, QA or software engineering: fresh releases, "
+    "announcements and articles from the site's live RSS feed.\n"
+    "general — everything else: coding help, science, math, history, languages, explanations, opinions, chat.\n"
+    "smalltalk — a bare greeting, thanks, goodbye, or yes/no with no real question.\n"
+    "Pick two agents only when the message genuinely needs both, for example Alex's expertise together "
+    "with fresh industry news.\n"
+    'Reply with JSON only, no prose: {"agents": ["rag"], "reason": "short reason"}'
+)
+
+SYNTHESIS_SYSTEM = (
+    "You merge draft answers written by specialist agents into one reply for the user. "
+    "Keep every concrete fact, name, link and number the specialists provided, drop repetition, "
+    "and never add information no specialist gave you. Answer in the user's language."
+)
+
+SUPERVISOR_AGENTS = ("rag", "news", "general", "smalltalk")
+SPECIALIST_AGENTS = ("rag", "news", "general")
+
+
+def _supervisor_llm_enabled():
+    return os.environ.get("SUPERVISOR_LLM", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _user_context_note(user):
+    name = _clean(str((user or {}).get("name") or ""), 60)
+    return f" The signed-in visitor is {name}; you may address them by first name." if name else ""
+
+
+def _supervisor_heuristic(message, channel):
+    """Deterministic routing — used for obvious turns and when the LLM router is unavailable."""
+    text = (message or "").strip()
+    if not text or _SIMPLE.match(text):
+        return ["smalltalk"], "simple"
+    news = bool(AGENT_NEWS_RE.search(text))
+    rag = bool(AGENT_RAG_RE.search(text))
+    if rag and news:
+        return ["rag", "news"], "keywords_rag_news"
+    if news:
+        return ["news"], "keyword_news"
+    if rag:
+        return ["rag"], "keyword_rag"
+    return ["general"], "general_chat"
+
+
+def _parse_supervisor_decision(raw):
+    text = (raw or "").strip()
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return [], ""
+    try:
+        parsed = json.loads(match.group(0))
+    except Exception:
+        return [], ""
+    if not isinstance(parsed, dict):
+        return [], ""
+    raw_agents = parsed.get("agents") or parsed.get("agent") or []
+    if isinstance(raw_agents, str):
+        raw_agents = [raw_agents]
+    agents = []
+    for item in raw_agents if isinstance(raw_agents, list) else []:
+        name = str(item or "").strip().lower()
+        if name in SUPERVISOR_AGENTS and name not in agents:
+            agents.append(name)
+    if len(agents) > 1:
+        agents = [name for name in agents if name != "smalltalk"]
+    return agents[:2], _clean(str(parsed.get("reason") or ""), 160)
+
+
+def _supervisor_route(message, channel):
+    """Hybrid supervisor: regex fast path for obvious turns, small LLM for the rest.
+
+    Returns (agents, reason, router). `router` is the model id that decided, or
+    "heuristic" when the fast path or the regex fallback answered instead.
+    """
+    text = (message or "").strip()
+    if not text or _SIMPLE.match(text):
+        return ["smalltalk"], "fast_path_simple", "heuristic"
+
+    news = bool(AGENT_NEWS_RE.search(text))
+    rag = bool(AGENT_RAG_RE.search(text))
+    if len(text) <= 160 and rag != news:
+        return (["rag"], "fast_path_rag", "heuristic") if rag else (["news"], "fast_path_news", "heuristic")
+
+    if _supervisor_llm_enabled():
+        model = _pick(TIER_S) or _pick(TIER_M) or _pick(TIER_H)
+        if model:
+            raw, err = _call_model(
+                model,
+                SUPERVISOR_SYSTEM,
+                f"Channel: {channel}\nUser message: {text[:1200]}\n\nJSON:",
+                120,
+            )
+            if not raw:
+                _record_model_failure(model, err)
+            agents, reason = _parse_supervisor_decision(raw)
+            # The LLM may see a quoted greeting inside a real question (for
+            # example, "How do I say 'good morning' in Spanish?") and call it
+            # smalltalk. Only the strict whole-message regex may choose that
+            # zero-cost path.
+            if agents == ["smalltalk"] and not _SIMPLE.match(text):
+                agents = []
+            if agents:
+                return agents, reason or "llm_route", model.get("id", "llm")
+
+    agents, reason = _supervisor_heuristic(text, channel)
+    return agents, reason, "heuristic_fallback"
+
+
+def _agent_deadline(channel):
+    """Wall-clock budget for one specialist's retries.
+
+    Free-tier providers fail often, and without a budget a bad streak turns a
+    single turn into a minute of retries that the visitor waits through.
+    """
+    budget = float(os.environ.get("AGENT_GENERATION_BUDGET_SECONDS", "25") or 25)
+    return time.monotonic() + (min(budget, 10.0) if channel == "voice" else budget)
+
+
+def _pool_wait_seconds(pool, tried):
+    """Seconds until the soonest benched model of `pool` is usable again.
+
+    The whole site runs on free tiers, so short rate-limit cooldowns (a few
+    seconds) are common. Waiting one out beats degrading the answer.
+    """
+    now = time.time()
+    waits = []
+    with MODEL_HEALTH_LOCK:
+        for model in pool:
+            if model.get("id") in tried or not _provider_available(model.get("provider", "groq")):
+                continue
+            expiries = [
+                MODEL_HEALTH[key]["disabled_until"]
+                for key in _model_health_keys(model)
+                if key in MODEL_HEALTH
+            ]
+            if expiries:
+                waits.append(max(expiries) - now)
+    return min(waits) if waits else None
+
+
+def _agent_generate(system_prompt, prompt, max_tok=700, tier="M", history=None, attempts_per_pool=4, deadline=None):
+    """Run one specialist generation across the model pool; returns (reply, model, err).
+
+    Free-tier providers fail often (401/402/404/429), so a specialist needs the
+    same depth of retries the general chat path gets — a couple of tries is not
+    enough to survive a bad streak — bounded by `deadline`.
+    """
+    pools = {"S": (TIER_S, TIER_M, TIER_H), "H": (TIER_H, TIER_M, TIER_S)}.get(tier, (TIER_M, TIER_H, TIER_S))
+    tried = set()
+    err = None
+    for pool in pools:
+        for _ in range(attempts_per_pool):
+            if deadline and time.monotonic() >= deadline:
+                return "", None, err or {"code": "generation_budget_exceeded"}
+            candidates = [m for m in pool if m["id"] not in tried]
+            model = _pick(candidates)
+            if not model:
+                wait = _pool_wait_seconds(candidates, tried)
+                remaining = (deadline - time.monotonic()) if deadline else 0
+                if wait is None or wait <= 0 or wait > max(remaining - 5, 0):
+                    break
+                time.sleep(wait + 0.2)
+                continue
+            tried.add(model["id"])
+            reply, err = _call_model(model, system_prompt, prompt, max_tok, history)
+            cleaned = _clean_model_reply(reply)
+            if _reply_is_usable(cleaned):
+                return cleaned, model, None
+            if cleaned:
+                err = {"code": "reasoning_leak", "provider": model.get("provider"), "model": model.get("id")}
+            _record_model_failure(model, err)
+    return "", None, err
+
+
+RAG_AGENT_SYSTEM = (
+    "You are the RAG Agent for Alex Pavlovsky's site. Answer using the provided context from "
+    "his portfolio and QA / AI-testing knowledge base, plus the earlier conversation. "
+    "Be specific and concrete. If the question is about something the user said earlier, answer from "
+    "the conversation. If neither the context nor the conversation covers it, say so plainly "
+    "instead of guessing."
+)
+
+# The RAG service runs its own model pool and, when every provider there fails,
+# returns the failure text in the `answer` field instead of raising. Detect that
+# so it never reaches a visitor as if it were an answer.
+RAG_SERVICE_FAILURE_RE = re.compile(r"LLM unavailable|all providers failed", re.IGNORECASE)
+
+
+RAG_EXTRACT_STOPWORDS = {
+    "about", "alex", "built", "does", "from", "have", "how", "into", "pavlovsky", "projects",
+    "that", "their", "them", "this", "what", "when", "where", "which", "with", "your", "использует",
+    "какие", "как", "расскажи", "алекс", "алекса", "павловский", "проект", "проекты", "свой",
+}
+
+
+def _rag_query_terms(message):
+    words = re.findall(r"[A-Za-zА-Яа-яЁё0-9+#.\-]{3,}", (message or "").lower())
+    return [word for word in words if word not in RAG_EXTRACT_STOPWORDS][:16]
+
+
+def _rag_extractive_fallback(message, contexts, channel, history=None):
+    """Produce a grounded answer when every generation provider is unavailable.
+
+    It quotes the most query-relevant sentences from retrieved chunks instead
+    of delegating to General Agent, so a provider outage can reduce fluency but
+    cannot turn into invented biography or technical claims.
+    """
+    earlier_user_turns = [
+        _clean(turn.get("content"), 500)
+        for turn in (history or [])
+        if isinstance(turn, dict) and turn.get("role") == "user" and _clean(turn.get("content"), 500)
+    ]
+    memory_question = re.search(
+        r"\b(?:did\s+i\s+(?:say|tell|mention)|my\s+(?:name|favou?rite)|remember|what\s+i\s+said)\b|"
+        r"\b(?:я\s+(?:сказал|говорил|упоминал)|мо[её]\s+(?:имя|любим))\b",
+        message or "",
+        re.IGNORECASE,
+    )
+    if memory_question and earlier_user_turns:
+        statement = earlier_user_turns[-1]
+        if channel == "voice":
+            return f"Earlier you said: {statement}"[:400]
+        return f"Earlier in this conversation, you said: “{statement}”"
+
+    terms = _rag_query_terms(message)
+    candidates = []
+    seen = set()
+    for context_index, context in enumerate(contexts[:5]):
+        pieces = re.split(r"(?<=[.!?])\s+|[\r\n]+", str(context))
+        for piece_index, piece in enumerate(pieces):
+            sentence = re.sub(r"\s+", " ", piece).strip(" -•\t")
+            if len(sentence) < 45 or len(sentence) > 520:
+                continue
+            key = sentence.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            lower = sentence.lower()
+            score = sum(3 if re.search(rf"\b{re.escape(term)}\b", lower) else 0 for term in terms)
+            score += max(0, 3 - context_index) * 0.2
+            candidates.append((score, context_index, piece_index, sentence))
+
+    if not candidates:
+        raise RuntimeError("rag_context_unusable")
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    selected = [item[3] for item in candidates[:2 if channel == "voice" else 3]]
+
+    if channel == "voice":
+        words = " ".join(selected).split()
+        return " ".join(words[:38]) + ("…" if len(words) > 38 else "")
+    if _looks_russian(message):
+        intro = "По материалам базы знаний наиболее релевантные факты:"
+    else:
+        intro = "According to the retrieved knowledge base:"
+    return intro + "\n\n" + "\n".join(f"- {sentence}" for sentence in selected)
+
+
+def _rag_generate_from_contexts(message, contexts, channel, history=None):
+    """Answer from retrieved chunks using this server's model pool and the conversation."""
+    context_text = "\n\n---\n\n".join(str(chunk)[:1500] for chunk in contexts[:5])
+    # Note: VOICE_AGENT_SYSTEM is deliberately not used here. It tells the model
+    # to refuse anything outside QA, which made it refuse legitimate questions
+    # about Alex once the supervisor — not the prompt — decides the routing.
+    system = RAG_AGENT_SYSTEM + (VOICE_BREVITY if channel == "voice" else "")
+    reply, _model, _err = _agent_generate(
+        system,
+        f"Context:\n{context_text}\n\nQuestion: {message}",
+        max_tok=200 if channel == "voice" else 700,
+        history=history,
+        deadline=_agent_deadline(channel),
+    )
+    return reply or _rag_extractive_fallback(message, contexts, channel, history)
+
+
+# Knowledge-base notes quote local machine paths (/Users/<name>/Projects/...).
+# Strip the machine part before text reaches an LLM, the public site or the
+# voice agent: keep the repo-relative path (the repos are public), drop the
+# user name and home layout.
+_LOCAL_PATH_PREFIX_RE = re.compile(
+    r"(?:/private)?/(?:Users|home)/[^/\s`'\"]+/(?:Projects|LocalApps|Desktop|Documents|Downloads|llm-wiki)/"
+)
+_LOCAL_HOME_RE = re.compile(r"(?:/private)?/(?:Users|home)/[^/\s`'\"]+")
+
+
+def _scrub_local_paths(text):
+    if not isinstance(text, str) or not text:
+        return text
+    return _LOCAL_HOME_RE.sub("~", _LOCAL_PATH_PREFIX_RE.sub("", text))
+
+
+def _scrub_sources(sources):
+    return [{k: _scrub_local_paths(v) for k, v in src.items()} if isinstance(src, dict) else src
+            for src in (sources or [])]
+
+
+def _call_agent_rag(message, channel, history=None):
+    payload = {
+        "query": message,
+        "retrieve_only": True,
+        "max_context_chunks": 3 if channel == "voice" else 5,
+    }
+    req = Request(
+        f"{RAG_API_URL}/api/rag/query",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(req, timeout=12 if channel == "voice" else 25) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    answer = (data.get("answer") or "").strip()
+    sources = [
+        {
+            "kind": "doc",
+            "filename": str(src.get("filename") or "")[:200],
+            "score": round(float(src.get("score") or 0), 3),
+        }
+        for src in (data.get("sources") or [])[:5]
+        if isinstance(src, dict)
+    ]
+    # The RAG service answers from retrieved chunks only — it never sees the
+    # conversation. So mid-conversation turns ("which tool did I just name?")
+    # are generated here instead, where the history is available.
+    if not answer or RAG_SERVICE_FAILURE_RE.search(answer) or history:
+        contexts = [chunk for chunk in (data.get("contexts") or []) if isinstance(chunk, str) and chunk.strip()]
+        if not contexts:
+            if answer and not RAG_SERVICE_FAILURE_RE.search(answer):
+                return _scrub_local_paths(answer), _scrub_sources(sources), data
+            raise RuntimeError("rag_answer_unavailable")
+        answer = _rag_generate_from_contexts(message, contexts, channel, history)
+        data["regenerated_locally"] = True
+    return _scrub_local_paths(answer), _scrub_sources(sources), data
+
+
+NEWS_STOPWORDS = {
+    "what", "whats", "the", "and", "for", "with", "about", "any", "are", "was", "were", "this",
+    "that", "there", "here", "have", "has", "had", "you", "your", "can", "could", "would", "should",
+    "tell", "give", "show", "please", "latest", "recent", "recently", "news", "new", "today",
+    "week", "month", "happening", "going", "from", "into", "over", "just", "some", "more", "most",
+    "anything", "something", "update", "updates", "is", "in", "of", "to", "do", "it", "on", "at",
+    "me", "my", "we", "us", "so", "or", "be", "by", "an", "as", "if", "up", "no", "чем", "что",
+    "нового", "новости", "последние",
+}
+
+# The feed is tagged ai / qa / dev, so a question about a whole area should pull
+# that area even when no individual word matches an article title.
+NEWS_CATEGORY_HINTS = {
+    "ai": re.compile(
+        r"\b(?:ai|a\.i\.|artificial\s+intelligence|llm|llms|gpt|genai|model|models|machine\s+learning|"
+        r"ml|openai|anthropic|claude|gemini|deepmind|hugging\s?face|mistral|agent|agents|agentic|"
+        r"ии|нейросет\w*)\b",
+        re.IGNORECASE,
+    ),
+    "qa": re.compile(
+        r"\b(?:qa|test|tests|testing|tester|playwright|cypress|selenium|automation|quality|e2e|"
+        r"регресс\w*|тест\w*)\b",
+        re.IGNORECASE,
+    ),
+    "dev": re.compile(
+        r"\b(?:dev|developer|development|engineering|frontend|backend|css|html|javascript|typescript|"
+        r"python|rust|golang|kubernetes|docker|devops|architecture|database|sql)\b",
+        re.IGNORECASE,
+    ),
+}
+
+
+def _news_keywords(message):
+    words = re.findall(r"[A-Za-z0-9#+.\-]{2,}", (message or "").lower())
+    return [word for word in words if word not in NEWS_STOPWORDS][:12]
+
+
+def _news_categories(message):
+    return {name for name, pattern in NEWS_CATEGORY_HINTS.items() if pattern.search(message or "")}
+
+
+def _news_rank_articles(message, articles, limit=8):
+    """Rank the cached feed by keyword hits, then topic category, then recency.
+
+    Articles arrive newest-first, so the sub-1.0 recency bonus keeps fresh items
+    on top when nothing matches without ever outranking a genuine hit.
+    """
+    # Whole-word matching matters: a substring test for a keyword like "ai"
+    # matches "said", "explain", "maintain" and buries the real AI stories.
+    patterns = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in _news_keywords(message)]
+    categories = _news_categories(message)
+    total = max(len(articles), 1)
+    scored = []
+    for index, item in enumerate(articles):
+        title = item.get("title") or ""
+        blob = f"{title} {item.get('description') or ''} {item.get('source') or ''} {item.get('category') or ''}"
+        score = sum(3 if pattern.search(title) else 1 for pattern in patterns if pattern.search(blob))
+        if item.get("category") in categories:
+            score += 3
+        scored.append((score + (total - index) / total, index, item))
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [item for _, _, item in scored[:limit]]
+
+
+def _call_agent_news(message, channel, history=None):
+    articles = _feed_cached_articles()
+    if not articles:
+        raise RuntimeError("news_feed_empty")
+    picked = _news_rank_articles(message, articles, limit=5 if channel == "voice" else 8)
+    lines = [
+        f"{index}. {item.get('title', '')} — {item.get('source', '')} ({(item.get('date') or '')[:10]})\n"
+        f"   {(item.get('description') or '')[:220]}\n"
+        f"   {item.get('link', '')}"
+        for index, item in enumerate(picked, 1)
+    ]
+    system = NEWS_AGENT_SYSTEM + (VOICE_BREVITY if channel == "voice" else "")
+    prompt = "Live feed articles (newest first):\n" + "\n".join(lines) + f"\n\nUser question: {message}"
+    reply, _model, err = _agent_generate(
+        system, prompt, max_tok=200 if channel == "voice" else 700,
+        history=history, deadline=_agent_deadline(channel),
+    )
+    if not reply:
+        raise RuntimeError(f"news_generation_failed:{_err_code(err) or 'unknown'}")
+    sources = [
+        {
+            "kind": "article",
+            "title": _clean(item.get("title"), 160),
+            "link": _clean(item.get("link"), 400),
+            "source": _clean(item.get("source"), 80),
+            "date": _clean(item.get("date"), 30)[:10],
+        }
+        for item in picked[:5]
+    ]
+    return reply, sources, len(articles)
+
+
+def _agent_fallback_chain(model, tier, reason):
+    chain = _get_fallback_chain(model, tier)
+    if reason == "vision":
+        chain = [fallback for fallback in chain if fallback.get("id") in VISION_MODEL_IDS]
+    return chain
+
+
+KNOWLEDGE_BASE_DOWN_NOTE = (
+    " The knowledge base about Alex Pavlovsky is unreachable for this turn. "
+    "Do NOT invent facts about Alex, his employers, projects, or results. If the question is about him, "
+    "say his knowledge base is temporarily unavailable and offer to help with the general topic instead."
+)
+
+
+def _call_agent_general(message, channel, history, user_note, guard_note=""):
+    system = _system_prompt() + (VOICE_BREVITY if channel == "voice" else "") + user_note + guard_note
+    deadline = _agent_deadline(channel)
+    model, tier, reason = _route(message, [])
+    max_tok = min(_max_tokens(tier), 220 if channel == "voice" else _max_tokens(tier))
+    user_content, warning = _build_content(message, [], model["id"])
+
+    with lfobs.observation(
+        "general_agent",
+        as_type="generation",
+        input={"message": lfobs.safe_text(message, 800), "history_turns": len(history)},
+        metadata={"provider": model.get("provider"), "tier": tier, "route_reason": reason},
+        model=model.get("id"),
+    ) as generation:
+        reply, err = _call_model(model, system, user_content, max_tok, history)
+        reply = _clean_model_reply(reply)
+        lfobs.update(generation, output=lfobs.safe_text(reply, 1200), metadata={"error": _err_code(err), "reply_chars": len(reply or "")})
+
+    if not _reply_is_usable(reply):
+        if reply:
+            err = {"code": "reasoning_leak", "provider": model.get("provider"), "model": model.get("id")}
+        _record_model_failure(model, err)
+        attempts = 0
+        for fallback in _agent_fallback_chain(model, tier, reason):
+            if attempts >= 5 or time.monotonic() >= deadline:
+                err = err or {"code": "generation_budget_exceeded"}
+                break
+            if not _model_available(fallback):
+                continue
+            attempts += 1
+            fallback_content, _ = _build_content(message, [], fallback["id"])
+            with lfobs.observation(
+                "fallback_generate",
+                as_type="generation",
+                input={"message": lfobs.safe_text(message, 800)},
+                metadata={"from_model": model.get("id"), "provider": fallback.get("provider")},
+                model=fallback.get("id"),
+            ) as generation:
+                reply, err = _call_model(fallback, system, fallback_content, max_tok, history)
+                reply = _clean_model_reply(reply)
+                lfobs.update(generation, output=lfobs.safe_text(reply, 1200), metadata={"error": _err_code(err), "reply_chars": len(reply or "")})
+            if _reply_is_usable(reply):
+                model = fallback
+                break
+            if reply:
+                err = {"code": "reasoning_leak", "provider": fallback.get("provider"), "model": fallback.get("id")}
+            _record_model_failure(fallback, err)
+            if time.monotonic() < deadline:
+                time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+
+    if not _reply_is_usable(reply):
+        return "", None, warning, err
+    return _sanitize_tool_call_reply(reply.strip(), message), model, warning, None
+
+
+def _synthesize_answers(message, drafts, channel, user_note):
+    """Fold two specialist drafts into one reply; fall back to concatenation."""
+    blocks = "\n\n".join(f"[{item['agent']}]\n{item['answer']}" for item in drafts)
+    system = SYNTHESIS_SYSTEM + user_note + (VOICE_BREVITY if channel == "voice" else "")
+    prompt = f"User message: {message}\n\nSpecialist drafts:\n\n{blocks}\n\nFinal answer:"
+    reply, model, _err = _agent_generate(
+        system, prompt, max_tok=220 if channel == "voice" else 900, deadline=_agent_deadline(channel)
+    )
+    if reply:
+        return reply, model
+    return "\n\n".join(item["answer"] for item in drafts), None
+
+
+def _run_agent_turn(message, *, channel="chat", session_id="", history=None, ip_hash="", max_reply_chars=0, user=None):
+    message = _clean(message, 12000)
+    history = history if isinstance(history, list) else []
+    history = history[-20:]
+    channel = _clean(channel, 20) or "chat"
+    user_note = _user_context_note(user)
+    trace_id = ""
+    trace_url = ""
+
+    root_input = {
+        "message": lfobs.safe_text(message, 1200),
+        "channel": channel,
+        "history_turns": len(history),
+        "signed_in": bool(user),
+    }
+    root_meta = {
+        "service": "alexpavsky-chat-server",
+        "surface": "chat" if channel == "chat" else channel,
+        "agent_runtime": os.environ.get("AGENT_RUNTIME", "1"),
+    }
+
+    with lfobs.observation("chat_turn" if channel == "chat" else "agent_turn", as_type="agent", input=root_input, metadata=root_meta) as root:
+        with lfobs.attributes(
+            user_id=(str(user.get("id")) if user else ip_hash[:16]),
+            session_id=session_id,
+            tags=["alexpavsky", "agent-runtime", channel] + (["signed-in"] if user else []),
+            metadata=root_meta,
+        ):
+            trace_id = lfobs.current_trace_id(root)
+            trace_url = lfobs.trace_url(trace_id)
+
+            guardrail_message = _normalize_guardrail_text(message or "")
+            with lfobs.observation("safety_gate", input={"chars": len(message)}, metadata={"channel": channel}) as safety:
+                refusal = ""
+                refusal_reason = ""
+                if PROMPT_EXTRACTION_RE.search(guardrail_message):
+                    refusal, refusal_reason = PROMPT_EXTRACTION_REFUSAL, "prompt_extraction"
+                elif HARMFUL_REQUEST_RE.search(guardrail_message):
+                    refusal, refusal_reason = HARMFUL_REQUEST_REFUSAL, "harmful_request"
+                lfobs.update(safety, output={"decision": "refuse" if refusal else "allow", "reason": refusal_reason})
+
+            if refusal:
+                lfobs.update(root, output={"reply": lfobs.safe_text(refusal), "route_intent": "safety_refusal"})
+                return {
+                    "status": 200,
+                    "reply": refusal,
+                    "answer": refusal,
+                    "answer_full": refusal,
+                    "agents_used": ["safety_gate"],
+                    "route_intent": "safety_refusal",
+                    "route_reason": refusal_reason,
+                    "trace_id": trace_id,
+                    "trace_url": trace_url,
+                }
+
+            with lfobs.observation("supervisor_route", input={"message": lfobs.safe_text(message, 500)}, metadata={"channel": channel}) as router:
+                agents, route_reason, route_model = _supervisor_route(message, channel)
+                if channel == "voice" and len(agents) > 1:
+                    # Voice turns must stay under a few seconds, so only the
+                    # primary specialist runs; no fan-out, no synthesis hop.
+                    agents = agents[:1]
+                    route_reason = f"{route_reason}+voice_single_agent"
+                lfobs.update(router, output={"agents": agents, "route_reason": route_reason}, metadata={"router": route_model})
+
+            agents_used = ["safety_gate", "supervisor_route"]
+
+            if agents == ["smalltalk"]:
+                reply = _local_fallback_reply(message) or ("Hi! How can I help?" if channel == "chat" else "Yes, I can hear you. Ask me about QA, Playwright, RAG evaluation, or CI quality gates.")
+                with lfobs.observation("response_adapter", input={"channel": channel}, output={"reply_chars": len(reply)}):
+                    pass
+                lfobs.update(root, output={"reply": lfobs.safe_text(reply), "route_intent": "smalltalk"})
+                return {
+                    "status": 200,
+                    "reply": reply,
+                    "answer": reply,
+                    "answer_full": reply,
+                    "agents_used": agents_used + ["response_adapter"],
+                    "route_intent": "smalltalk",
+                    "route_reason": route_reason,
+                    "route_model": route_model,
+                    "trace_id": trace_id,
+                    "trace_url": trace_url,
+                }
+
+            queue = [agent for agent in agents if agent in SPECIALIST_AGENTS] or ["general"]
+            executed = []
+            drafts = []
+            sources = []
+            model_label = ""
+            warning = ""
+            err = None
+            knowledge_base_down = False
+
+            while queue:
+                agent = queue.pop(0)
+                if agent in executed:
+                    continue
+                executed.append(agent)
+
+                if agent == "rag":
+                    try:
+                        with lfobs.observation(
+                            "rag_agent",
+                            as_type="retriever",
+                            input={"query": lfobs.safe_text(message, 800)},
+                            metadata={"rag_api_url": RAG_API_URL, "channel": channel},
+                        ) as span:
+                            answer, rag_sources, rag_data = _call_agent_rag(message, channel, history)
+                            lfobs.update(
+                                span,
+                                output={"answer_chars": len(answer), "sources": rag_sources},
+                                metadata={"source_count": len(rag_sources), "raw_keys": sorted(list(rag_data.keys()))[:12]},
+                            )
+                        if not answer:
+                            raise RuntimeError("empty_rag_answer")
+                        agents_used.append("rag_agent")
+                        drafts.append({"agent": "rag_agent", "answer": answer})
+                        sources.extend(rag_sources)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("rag agent failed: %s", exc)
+                        with lfobs.observation("rag_agent_error", input={"query": lfobs.safe_text(message, 500)}, metadata={"error": f"{type(exc).__name__}: {exc}"}):
+                            pass
+                        knowledge_base_down = True
+                        if not drafts and "general" not in executed and "general" not in queue:
+                            queue.append("general")
+                            route_reason = f"{route_reason}+rag_error_general_fallback"
+
+                elif agent == "news":
+                    try:
+                        with lfobs.observation(
+                            "news_agent",
+                            as_type="retriever",
+                            input={"query": lfobs.safe_text(message, 800)},
+                            metadata={"channel": channel},
+                        ) as span:
+                            answer, news_sources, feed_size = _call_agent_news(message, channel, history)
+                            lfobs.update(
+                                span,
+                                output={"answer_chars": len(answer), "sources": news_sources},
+                                metadata={"feed_articles": feed_size, "source_count": len(news_sources)},
+                            )
+                        agents_used.append("news_agent")
+                        drafts.append({"agent": "news_agent", "answer": answer})
+                        sources.extend(news_sources)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("news agent failed: %s", exc)
+                        with lfobs.observation("news_agent_error", input={"query": lfobs.safe_text(message, 500)}, metadata={"error": f"{type(exc).__name__}: {exc}"}):
+                            pass
+                        if not drafts and "general" not in executed and "general" not in queue:
+                            queue.append("general")
+                            route_reason = f"{route_reason}+news_error_general_fallback"
+
+                else:
+                    # When the RAG agent could not answer, the general model must
+                    # not fill the gap with invented biography.
+                    answer, general_model, warning, err = _call_agent_general(
+                        message, channel, history, user_note,
+                        KNOWLEDGE_BASE_DOWN_NOTE if knowledge_base_down else "",
+                    )
+                    if answer:
+                        agents_used.append("general_agent")
+                        drafts.append({"agent": "general_agent", "answer": answer})
+                        model_label = (general_model or {}).get("label", "")
+
+            if not drafts:
+                local_reply = _local_fallback_reply(message)
+                if local_reply:
+                    lfobs.update(root, output={"reply": lfobs.safe_text(local_reply), "degraded": True})
+                    return {
+                        "status": 200,
+                        "reply": local_reply,
+                        "answer": local_reply,
+                        "answer_full": local_reply,
+                        "degraded": True,
+                        "agents_used": agents_used + ["local_fallback"],
+                        "route_intent": "local_fallback",
+                        "route_reason": route_reason,
+                        "route_model": route_model,
+                        "trace_id": trace_id,
+                        "trace_url": trace_url,
+                    }
+                return {
+                    "status": 502,
+                    "error": _err_code(err) or "no_response",
+                    "reply": "Sorry, all AI models are temporarily unavailable. Please try again in a moment.",
+                    "agents_used": agents_used,
+                    "route_intent": "model_unavailable",
+                    "route_reason": route_reason,
+                    "route_model": route_model,
+                    "trace_id": trace_id,
+                    "trace_url": trace_url,
+                }
+
+            if len(drafts) > 1:
+                with lfobs.observation(
+                    "synthesis_agent",
+                    as_type="generation",
+                    input={"drafts": [item["agent"] for item in drafts]},
+                    metadata={"channel": channel},
+                ) as span:
+                    reply, synthesis_model = _synthesize_answers(message, drafts, channel, user_note)
+                    lfobs.update(span, output=lfobs.safe_text(reply, 1200), metadata={"model": (synthesis_model or {}).get("id", "concatenated")})
+                agents_used.append("synthesis_agent")
+                if synthesis_model and not model_label:
+                    model_label = synthesis_model.get("label", "")
+            else:
+                reply = drafts[0]["answer"]
+
+            spoken = reply[:max_reply_chars].strip() if max_reply_chars and len(reply) > max_reply_chars else reply
+            with lfobs.observation("response_adapter", input={"channel": channel, "answer_chars": len(reply), "warning": warning}, output={"reply_chars": len(spoken)}):
+                pass
+            agents_used.append("response_adapter")
+
+            route_intent = "+".join(item["agent"].replace("_agent", "") for item in drafts)
+            lfobs.update(root, output={"reply": lfobs.safe_text(spoken), "route_intent": route_intent, "source_count": len(sources)})
+            return {
+                "status": 200,
+                "reply": spoken,
+                "answer": spoken,
+                "answer_full": reply,
+                "sources": sources[:8],
+                "model": model_label,
+                "warning": warning,
+                "agents_used": agents_used,
+                "route_intent": route_intent,
+                "route_reason": route_reason,
+                "route_model": route_model,
+                "trace_id": trace_id,
+                "trace_url": trace_url,
+                "via": f"agent_runtime_{route_intent}",
+            }
+
+
 class Handler(SimpleHTTPRequestHandler):
     _ALLOWED_ORIGINS = {
         "https://alexpavsky.com",
@@ -3151,6 +4029,37 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         return json.loads(self.rfile.read(length).decode()) if length > 0 else {}
 
+    def _handle_agent_turn(self):
+        try:
+            body = self._read_body()
+        except Exception:
+            self._json(400, {"error": "invalid_json"})
+            return
+        message = _clean(body.get("message") or body.get("query") or body.get("text"), 12000)
+        if not message:
+            self._json(400, {"error": "empty_message"})
+            return
+        channel = _clean(body.get("channel"), 20) or "api"
+        session_id = _clean(body.get("session_id"), 128) or uuid.uuid4().hex
+        history = body.get("history", [])
+        ip_hash = _hash_ip(self._client_ip())
+        max_reply_chars = int(body.get("max_reply_chars") or (600 if channel == "voice" else 0))
+        user = _get_user_by_token(self._get_token())
+        if user and not (isinstance(history, list) and history):
+            history = _recent_user_turns(user.get("id"))
+        result = _run_agent_turn(
+            message,
+            channel=channel,
+            session_id=session_id,
+            history=history,
+            ip_hash=ip_hash,
+            max_reply_chars=max_reply_chars,
+            user=user,
+        )
+        lfobs.flush()
+        status = int(result.pop("status", 200))
+        self._json(status, result)
+
     def _maintenance_cookie(self, value: str, max_age: int) -> str:
         host = (self.headers.get("Host", "") or "").split(":", 1)[0].lower()
         is_local = host in {"127.0.0.1", "localhost", "::1"}
@@ -3212,6 +4121,11 @@ class Handler(SimpleHTTPRequestHandler):
                             "nvidia", "cohere", "cloudflare", "github",
                             "cerebras", "sambanova",
                         )
+                    },
+                    "observability": {
+                        "langfuse": lfobs.enabled(),
+                        "langfuse_url": lfobs.trace_url(""),
+                        "rag_api_url": RAG_API_URL,
                     },
                 })
             else:
@@ -3758,6 +4672,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/challenge": "_handle_challenge",
             "/api/attack-generator": "_handle_attack_generator",
             "/api/hallucination": "_handle_hallucination",
+            "/api/agent/turn": "_handle_agent_turn",
         }
         handler_name = POST_ROUTES.get(self.path)
         if handler_name is not None:
@@ -3813,19 +4728,47 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(400, {"error": "empty_message"})
             return
 
-        _log_message(session_id, ip_hash, "user", message or "[attachment]")
+        user = _get_user_by_token(self._get_token())
+        user_id = user.get("id") if user else None
+        if user and not history:
+            history = _recent_user_turns(user_id)
+
+        _log_message(session_id, ip_hash, "user", message or "[attachment]", None, user_id)
         lf = self._lf_trace(body, session_id, ip_hash, message, attachments)
 
         # Trivial greetings/thanks: reply instantly and locally so a simple "hi"
-        # never waits on the model pool (kills the rare slow-model smalltalk route).
+        # never waits on the model pool — in agent mode and with AGENT_RUNTIME=0.
         if message and not attachments:
             smalltalk_reply = _local_fallback_reply(message)
             if smalltalk_reply:
-                _log_message(session_id, ip_hash, "assistant", smalltalk_reply, model="smalltalk")
+                _log_message(session_id, ip_hash, "assistant", smalltalk_reply, "smalltalk", user_id)
                 if lf:
                     lf.finish(smalltalk_reply, route="smalltalk")
-                self._json(200, {"reply": smalltalk_reply})
+                self._json(200, {"reply": smalltalk_reply, "route_intent": "smalltalk"}, new_session)
                 return
+
+        if os.environ.get("AGENT_RUNTIME", "1").strip().lower() not in {"0", "false", "no", "off"} and not attachments and not _is_image_generation_request(message):
+            result = _run_agent_turn(
+                message,
+                channel="chat",
+                session_id=session_id,
+                history=history,
+                ip_hash=ip_hash,
+                user=user,
+            )
+            lfobs.flush()
+            status = int(result.pop("status", 200))
+            reply_for_log = result.get("reply") or result.get("answer") or ""
+            if reply_for_log:
+                _log_message(session_id, ip_hash, "assistant", reply_for_log, result.get("model") or result.get("via") or "agent_runtime", user_id)
+            if lf:
+                lf.finish(
+                    reply_for_log,
+                    route=result.get("route_intent", "agent_runtime"),
+                    model=result.get("model") or result.get("via") or "agent_runtime",
+                )
+            self._json(status, result, new_session)
+            return
 
         t_route = time.time()
         model, tier, reason = _route(message, attachments)

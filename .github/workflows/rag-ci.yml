@@ -42,3 +42,8 @@ jobs:
         env:
           PYTHONPATH: .
         run: python -m pytest tests/test_rag_safety.py -q
+      - name: Run agent runtime tests
+        env:
+          PYTHONPATH: .
+          LANGFUSE_DISABLED: "1"
+        run: python -m pytest tests/test_agent_runtime.py -q

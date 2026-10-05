@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     document_id     UUID        NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index     INT         NOT NULL,
     content         TEXT        NOT NULL,
-    embedding       vector(1536),           -- text-embedding-3-small output dim
+    embedding       vector(384),            -- all-MiniLM-L6-v2 output dim (rag/main.py EMBED_DIM)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (document_id, chunk_index)
 );
