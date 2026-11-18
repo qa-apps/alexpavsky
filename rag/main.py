@@ -646,11 +646,13 @@ def _scrub_local_paths(text):
 
 
 def _is_internal_caller(request: Request) -> bool:
-    """True for on-box callers (chat_server, voice). Nginx sets forwarded headers."""
-    if request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip"):
-        return False
-    host = request.client.host if request.client else ""
-    return host in {"127.0.0.1", "::1", "localhost"}
+    """True for on-box callers (chat_server, voice, docker bridge).
+
+    Public traffic is always proxied by nginx, which sets X-Real-IP /
+    X-Forwarded-For. The RAG container sees host chat_server as a docker
+    bridge address, not 127.0.0.1, so we key off forwarded headers only.
+    """
+    return not (request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip"))
 
 
 def _public_rows(rows):
