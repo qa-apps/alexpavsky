@@ -2,8 +2,55 @@
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
+
+# Published handbooks visitors may retrieve. Personal wiki notes, lab logs,
+# and other files in the same vector store stay out of public answers.
+PUBLIC_KB_FILENAMES = frozenset(
+    {
+        "01_Senior_QA_Automation_AI_Assisted_Testing_Handbook.docx",
+        "02_Playwright_TypeScript_Framework_Architecture.docx",
+        "03_LLM_Evaluation_RAG_Testing_QA_Guide.docx",
+        "04_MCP_Servers_Agentic_Testing_SDET_Guide.docx",
+        "05_Cloud_Kubernetes_Observability_Security_QA_Guide.docx",
+        "Advanced LLM Red Teaming and Adversarial Testing Strategies for QA Engineers.docx",
+        "Architecting LLM-as-a-Judge Evaluation Frameworks for Generative AI Features.docx",
+        "Data Integrity and Distributed Systems Automation_ GraphQL, Kafka, and Database Validation.docx",
+        "Enterprise Playwright Automation Architecture for Scalable SaaS Platforms.docx",
+        "Implementing Model Context Protocol (MCP) in Agentic Test Orchestration.docx",
+    }
+)
+
+_KB_EXFIL_RE = re.compile(
+    r"(?:verbatim|word[\s-]*for[\s-]*word|unsummarized)|"
+    r"(?:quote|dump|repeat|print|extract|output|show)\s+.{0,80}"
+    r"(?:chunks?|full text|retrieved context|knowledge base|document)|"
+    r"(?:list|give|show|print)\s+(?:all\s+)?(?:documents?|files?|filenames?)\b.{0,80}"
+    r"(?:knowledge base|\brag\b|metadata)|"
+    r"\bdocument_id\b|\bchunk_count\b|"
+    r"(?:internal\s+paths?|filenames?\s+and\s+metadata)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_KB_EXFIL_RESPONSE = (
+    "I can't dump knowledge-base documents, filenames, or retrieved chunks. "
+    "Ask a specific question about a topic and I'll summarize."
+)
+
+
+def is_public_kb_filename(name: str | None) -> bool:
+    """True when `name` is one of the published handbooks."""
+    base = os.path.basename(str(name or "")).strip()
+    if not base:
+        return False
+    if base in PUBLIC_KB_FILENAMES:
+        return True
+    stem, ext = os.path.splitext(base)
+    if ext.lower() in {".docx", ".pdf", ".md", ".txt"}:
+        return f"{stem}.docx" in PUBLIC_KB_FILENAMES
+    return f"{base}.docx" in PUBLIC_KB_FILENAMES
 
 
 _CONFUSABLE_TRANSLATION = str.maketrans(
@@ -118,6 +165,8 @@ def safety_response(query: str) -> str | None:
     text = _normalize(query)
     if _PROMPT_INJECTION_RE.search(text):
         return _PROMPT_INJECTION_RESPONSE
+    if _KB_EXFIL_RE.search(text):
+        return _KB_EXFIL_RESPONSE
     if _HARMFUL_RE.search(text):
         return _HARMFUL_RESPONSE
     if _DEMOGRAPHIC_RE.search(text) and _DEMOGRAPHIC_DECISION_RE.search(text):
