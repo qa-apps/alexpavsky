@@ -2371,7 +2371,8 @@ PROMPT_EXTRACTION_RE = re.compile(
     r"(?:to\s+spanish|into\s+spanish|al\s+espa[nñ]ol|en\s+espa[nñ]ol|word\s+for\s+word)|"
     r"prompt\s+de\s+sistema|"
     r"(?:what\s+are|list|show)\s+your\s+(?:rules|instructions|guidelines|policies)\b|"
-    r"repeat\s+everything\s+you\s+were\s+(?:told|given|taught)",
+    r"repeat\s+everything\s+you\s+were\s+(?:told|given|taught)|"
+    r"^(?:please\s+)?(?:translate|traduce|traducir)\s+(?:this\s+)?(?:to|into|al|en)\s+(?:spanish|espa[nñ]ol)\s*[.?!]?$",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -2404,6 +2405,7 @@ _SYSTEM_PROMPT_FINGERPRINTS = (
     "do not emit tool-call json",
     "hub tecnologico personal",
     "hub tecnológico personal",
+    "context provided in the system prompt",
 )
 
 _GUARDRAIL_CONFUSABLES = str.maketrans({
