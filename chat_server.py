@@ -4259,7 +4259,21 @@ class Handler(SimpleHTTPRequestHandler):
                     },
                 })
             else:
-                self._json(200, {"status": "ok"})
+                # Public body stays small (no provider/DB fingerprint). Slack
+                # observability cards still need a boolean backend flag.
+                self._json(200, {
+                    "status": "ok",
+                    "observability": {
+                        "chat": {
+                            "backend": "langfuse" if lfobs.enabled() else "off",
+                            "trace_deeplink": False,
+                        },
+                        "voice": {
+                            "backend": "langwatch",
+                            "trace_deeplink": False,
+                        },
+                    },
+                })
             return
 
         if qs.get("access_key", [None])[0] == MAINTENANCE_KEY:
