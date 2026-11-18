@@ -27,16 +27,24 @@ import httpx
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
 try:
-    from .safety import safety_response
+    from .safety import PUBLIC_KB_FILENAMES, is_public_kb_filename, safety_response
 except ImportError:  # Docker starts uvicorn from inside /app.
-    from safety import safety_response
+    from safety import PUBLIC_KB_FILENAMES, is_public_kb_filename, safety_response
+
+try:
+    from .redaction import redact_local_paths
+except ImportError:
+    try:
+        from redaction import redact_local_paths
+    except ImportError:
+        redact_local_paths = None  # type: ignore
 
 try:
     import PyPDF2
@@ -637,19 +645,37 @@ def _scrub_local_paths(text):
     return _LOCAL_HOME_RE.sub("~", _LOCAL_PATH_PREFIX_RE.sub("", text))
 
 
+def _is_internal_caller(request: Request) -> bool:
+    """True for on-box callers (chat_server, voice, docker bridge).
+
+    Public traffic is always proxied by nginx, which sets X-Real-IP /
+    X-Forwarded-For. The RAG container sees host chat_server as a docker
+    bridge address, not 127.0.0.1, so we key off forwarded headers only.
+    """
+    return not (request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip"))
+
+
+def _public_rows(rows):
+    return [row for row in (rows or []) if is_public_kb_filename(row.get("filename"))]
+
+
 # Endpoints below are plain `def` on purpose: they call blocking code (psycopg2,
 # Qdrant, sentence-transformers, LLM HTTP). As `async def` they ran on the single
 # event loop, so one slow generation froze every request — including the
 # millisecond retrieve_only calls the chat RAG Agent and the voice agent depend on.
 # FastAPI runs `def` endpoints in a threadpool. Upload stays async (awaits the file).
 @app.post("/api/rag/query")
-def rag_query(req: QueryRequest):
+def rag_query(req: QueryRequest, request: Request):
     """
     Semantic search over stored chunks, then generate an answer via LLM.
     Returns answer, sources, Ragas metrics, and both pgvector / Qdrant results.
     """
     if not req.query.strip():
         raise HTTPException(400, "query must not be empty")
+
+    internal = _is_internal_caller(request)
+    if req.retrieve_only and not internal:
+        raise HTTPException(403, "retrieve_only is not available")
 
     blocked_answer = safety_response(req.query)
     if blocked_answer:
@@ -664,15 +690,18 @@ def rag_query(req: QueryRequest):
         }
 
     query_vec = embed_one(req.query)
+    public_names = list(PUBLIC_KB_FILENAMES)
 
     # --- pgvector search ---
     conn = get_pg()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            filter_clause = ""
+            filters = ["d.filename = ANY(%s)"]
+            params = [query_vec, public_names]
             if req.document_id:
-                filter_clause = "WHERE dc.document_id = %s"
-
+                filters.append("dc.document_id = %s")
+                params.append(req.document_id)
+            params.extend([query_vec, RAG_TOP_K])
             cur.execute(
                 f"""
                 SELECT dc.content,
@@ -682,23 +711,23 @@ def rag_query(req: QueryRequest):
                        1 - (dc.embedding <=> %s::vector) AS score
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
-                {filter_clause}
+                WHERE {' AND '.join(filters)}
                 ORDER BY dc.embedding <=> %s::vector
                 LIMIT %s
                 """,
-                [query_vec] + ([req.document_id] if req.document_id else []) + [query_vec, RAG_TOP_K],
+                params,
             )
             pg_results = [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
 
     # --- Qdrant search ---
-    qdrant_filter = None
+    from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
+
+    must = [FieldCondition(key="filename", match=MatchAny(any=public_names))]
     if req.document_id:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-        qdrant_filter = Filter(
-            must=[FieldCondition(key="document_id", match=MatchValue(value=req.document_id))]
-        )
+        must.append(FieldCondition(key="document_id", match=MatchValue(value=req.document_id)))
+    qdrant_filter = Filter(must=must)
 
     q_hits = qdrant_client.search(
         collection_name=QDRANT_COLLECTION,
@@ -716,6 +745,8 @@ def rag_query(req: QueryRequest):
         for h in q_hits
     ]
 
+    pg_results = _public_rows(pg_results)
+    qdrant_results = _public_rows(qdrant_results)
     result_limit = max(1, min(req.max_context_chunks or RAG_TOP_K, RAG_TOP_K))
     pg_results = pg_results[:result_limit]
     qdrant_results = qdrant_results[:result_limit]
@@ -725,7 +756,17 @@ def rag_query(req: QueryRequest):
     context_chunks = [_scrub_local_paths(c) for c in context_chunks]
 
     if not context_chunks:
-        raise HTTPException(404, "No relevant documents found. Upload documents first.")
+        return {
+            "answer": (
+                "I don't have public knowledge-base material for that. "
+                "Try a question about QA, Playwright, or AI testing."
+            ),
+            "sources": [],
+            "contexts": [],
+            "metrics": {},
+            "pgvector_results": [],
+            "qdrant_results": [],
+        }
 
     # Low-latency callers (voice) can cap the context chunks fed to the LLM:
     # fewer chunks keep the prompt under the fast 8B model's payload limit
@@ -741,6 +782,10 @@ def rag_query(req: QueryRequest):
             "filename": r.get("filename"),
         }
         for r in source_rows
+    ]
+    public_sources = [
+        {"filename": src.get("filename"), "score": src.get("score")}
+        for src in sources
     ]
 
     if req.retrieve_only:
@@ -808,6 +853,19 @@ def rag_query(req: QueryRequest):
     finally:
         conn.close()
 
+    metrics = {
+        "faithfulness": round(faithfulness, 4) if faithfulness is not None else None,
+        "answer_relevancy": round(answer_relevancy, 4) if answer_relevancy is not None else None,
+    }
+    if not internal:
+        return {
+            "answer": _scrub_local_paths(answer),
+            "sources": public_sources,
+            "contexts": [],
+            "metrics": metrics,
+            "pgvector_results": [],
+            "qdrant_results": [],
+        }
     return {
         "answer": _scrub_local_paths(answer),
         "sources": sources,
@@ -815,10 +873,7 @@ def rag_query(req: QueryRequest):
         # need to verify groundedness (Ragas faithfulness, manual audit) should
         # read this instead of `sources[].content`, which is a 300-char preview.
         "contexts": context_chunks,
-        "metrics": {
-            "faithfulness": round(faithfulness, 4) if faithfulness is not None else None,
-            "answer_relevancy": round(answer_relevancy, 4) if answer_relevancy is not None else None,
-        },
+        "metrics": metrics,
         "pgvector_results": [{"content": r["content"][:200], "score": float(r["score"])} for r in pg_results],
         "qdrant_results": [{"content": r["content"][:200], "score": round(r["score"], 4)} for r in qdrant_results],
     }
@@ -976,6 +1031,10 @@ def rag_metrics():
     for r in rows:
         if isinstance(r.get("created_at"), datetime):
             r["created_at"] = r["created_at"].isoformat()
+        scrubber = redact_local_paths or _scrub_local_paths
+        for field in ("query", "answer"):
+            if isinstance(r.get(field), str):
+                r[field] = scrubber(r[field])
 
     return {
         "queries": rows,
